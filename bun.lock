@@ -4,10 +4,8 @@
   "workspaces": {
     "": {
       "name": "claude-sidecar",
-      "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.29.0",
-      },
       "devDependencies": {
+        "@modelcontextprotocol/sdk": "^1.29.0",
         "@types/bun": "latest",
       },
       "peerDependencies": {

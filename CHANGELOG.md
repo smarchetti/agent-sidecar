@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.0 — 2026-07-04
+
+- Distribution moved to npm: the plugin manifest now launches `bunx agent-sidecar@<version>` instead of running a bundle committed in the repo. `dist/` is no longer tracked in git (built by `prepublishOnly` at publish time), and the CI drift check is gone.
+
 ## 0.5.0 — 2026-07-04
 
 - New `GET /api/wait` long-poll endpoint: blocks until the next interaction and returns it as JSON (token-gated; `artifact_id` filter, optional `timeout` cap, waits indefinitely by default). Lets Claude run a background `curl` watcher and keep working instead of parking on the blocking tool — server instructions now teach both patterns and include the ready-to-run command.

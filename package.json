@@ -1,23 +1,40 @@
 {
   "name": "agent-sidecar",
-  "version": "0.5.0",
-  "module": "sidecar.ts",
+  "version": "0.6.0",
+  "description": "A visual canvas for Claude Code: Claude shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation. MCP server.",
   "type": "module",
-  "private": true,
   "license": "MIT",
+  "bin": {
+    "agent-sidecar": "dist/sidecar.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smarchetti/agent-sidecar.git"
+  },
+  "homepage": "https://smarchetti.github.io/agent-sidecar/",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "canvas",
+    "artifacts",
+    "webhook"
+  ],
   "engines": {
     "bun": ">=1.2"
   },
   "scripts": {
-    "build": "bun build sidecar.ts --target=bun --outfile=dist/sidecar.js"
+    "build": "bun build sidecar.ts --target=bun --outfile=dist/sidecar.js",
+    "prepublishOnly": "bun run build"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

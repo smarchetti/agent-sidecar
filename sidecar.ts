@@ -381,7 +381,7 @@ function openBrowser(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: 'sidecar', version: '0.5.0' },
+  { name: 'sidecar', version: '0.6.0' },
   {
     capabilities: { tools: {} },
     instructions: [

@@ -39,7 +39,7 @@ The repo doubles as its own plugin marketplace. In any Claude Code session:
 /plugin install sidecar@agent-sidecar
 ```
 
-Restart Claude Code and the sidecar tools are available in every project. The plugin runs the committed `dist/sidecar.js` bundle — no `bun install` needed at install time. Session state (interaction log, canvas contents, session info) is written to `.sidecar/` in whatever project you're working in.
+Restart Claude Code and the sidecar tools are available in every project. The plugin launches the server with `bunx agent-sidecar@<version>` — bunx fetches the published [npm package](https://www.npmjs.com/package/agent-sidecar) (a self-contained bundle) on first run and caches it. Session state (interaction log, canvas contents, session info) is written to `.sidecar/` in whatever project you're working in.
 
 Then ask Claude for something visual, e.g. *"show me three layout options for a pricing page on the sidecar canvas."*
 
@@ -56,11 +56,7 @@ To run your working copy, start Claude Code with the dev MCP config (it's delibe
 claude --mcp-config dev.mcp.json
 ```
 
-After changing `sidecar.ts` or `canvas.html`, rebuild the plugin bundle:
-
-```bash
-bun run build   # regenerates dist/sidecar.js (committed — CI fails if it drifts from source)
-```
+Releasing a new version: bump `version` in `package.json` and the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, then `npm publish` (the `prepublishOnly` script rebuilds `dist/sidecar.js` — it's not committed).
 
 ## MCP tools
 

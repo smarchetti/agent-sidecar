@@ -4,8 +4,9 @@ node_modules
 # sidecar interaction log
 .sidecar/
 
-# output (note: dist/ is committed — plugin installs run the bundled dist/sidecar.js)
+# output (dist/ is built on npm publish via prepublishOnly, not committed)
 out
+dist
 *.tgz
 
 # code coverage

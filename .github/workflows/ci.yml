@@ -18,11 +18,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build plugin bundle
+      - name: Build bundle (what npm publish ships)
         run: bun run build
-
-      - name: Fail if committed dist/ is stale
-        run: git diff --exit-code dist/
 
       - name: Run tests
         run: bun test
