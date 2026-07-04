@@ -253,6 +253,47 @@ describe('await_interaction', () => {
   })
 })
 
+describe('GET /api/wait (background watcher)', () => {
+  test('rejects without token', async () => {
+    const res = await fetch(`${base}/api/wait?timeout=1`)
+    expect(res.status).toBe(403)
+  })
+
+  test('returns a queued interaction immediately as JSON', async () => {
+    await webhook({ artifactId: 'w-art', payload: { pick: 'x' } }, { token: session.token })
+    await Bun.sleep(100)
+    const res = await fetch(`${base}/api/wait?token=${session.token}`)
+    expect(res.status).toBe(200)
+    const i = (await res.json()) as { kind: string; artifactId: string; payload: { pick: string } }
+    expect(i.kind).toBe('interaction')
+    expect(i.artifactId).toBe('w-art')
+    expect(i.payload.pick).toBe('x')
+  })
+
+  test('blocks until an interaction arrives, honoring artifact_id filter', async () => {
+    setTimeout(async () => {
+      await webhook({ artifactId: 'not-me', payload: { n: 1 } }, { token: session.token })
+      await webhook({ artifactId: 'me', payload: { n: 2 } }, { token: session.token })
+    }, 300)
+    const t0 = Date.now()
+    const res = await fetch(`${base}/api/wait?token=${session.token}&artifact_id=me`)
+    const i = (await res.json()) as { artifactId: string; payload: { n: number } }
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(250)
+    expect(i.artifactId).toBe('me')
+    expect(i.payload.n).toBe(2)
+    // the non-matching interaction is still queued
+    const drained = await client.callTool({ name: 'get_interactions', arguments: {} })
+    expect(text(drained)).toContain('"n":1')
+  })
+
+  test('returns 408 when the timeout cap elapses', async () => {
+    const t0 = Date.now()
+    const res = await fetch(`${base}/api/wait?token=${session.token}&timeout=1`)
+    expect(res.status).toBe(408)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(950)
+  })
+})
+
 describe('interaction log', () => {
   test('interactions.jsonl records everything with seq/kind/payload', async () => {
     const jsonl = await Bun.file(join(WORKDIR, '.sidecar', 'interactions.jsonl')).text()

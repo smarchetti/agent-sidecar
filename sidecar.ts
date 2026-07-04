@@ -242,14 +242,60 @@ const serveOptions = {
       })
     }
 
-    // Webhook receiver: artifact interactions and any external POSTs queue for Claude
-    if (req.method === 'POST' && url.pathname === '/api/webhook') {
-      const provided =
-        req.headers.get('x-sidecar-token') ??
+    const authorized =
+      (req.headers.get('x-sidecar-token') ??
         url.searchParams.get('token') ??
         req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
-        ''
-      if (provided !== TOKEN) {
+        '') === TOKEN
+
+    // Long-poll for the next interaction: the "background watcher" counterpart to the
+    // await_interaction tool. Blocks until an interaction arrives (?timeout=SECS to cap,
+    // 0/absent = wait indefinitely), then returns it as JSON. Claude runs this via a
+    // background Bash `curl` so it can keep working and get re-invoked on your click.
+    if (req.method === 'GET' && url.pathname === '/api/wait') {
+      if (!authorized) {
+        return new Response('missing or invalid token (see .sidecar/session.json)', { status: 403 })
+      }
+      const artifactId = url.searchParams.get('artifact_id') ?? undefined
+
+      const queuedIdx = pending.findIndex(i => matches(i, artifactId))
+      if (queuedIdx >= 0) {
+        const [queued] = pending.splice(queuedIdx, 1)
+        return Response.json(queued)
+      }
+
+      const timeoutSec = Number(url.searchParams.get('timeout')) || 0
+      const interaction = await new Promise<Interaction | null>(resolve => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const waiter: Waiter = {
+          artifactId,
+          resolve: i => {
+            cleanup()
+            resolve(i)
+          },
+        }
+        const giveUp = () => {
+          const idx = waiters.indexOf(waiter)
+          if (idx >= 0) waiters.splice(idx, 1)
+          cleanup()
+          resolve(null)
+        }
+        const cleanup = () => {
+          if (timer) clearTimeout(timer)
+          req.signal.removeEventListener('abort', giveUp)
+        }
+        if (timeoutSec > 0) timer = setTimeout(giveUp, timeoutSec * 1000)
+        req.signal.addEventListener('abort', giveUp)
+        waiters.push(waiter)
+      })
+
+      if (!interaction) return Response.json({ status: 'no_response' }, { status: 408 })
+      return Response.json(interaction)
+    }
+
+    // Webhook receiver: artifact interactions and any external POSTs queue for Claude
+    if (req.method === 'POST' && url.pathname === '/api/webhook') {
+      if (!authorized) {
         return new Response('missing or invalid token (see .sidecar/session.json)', { status: 403 })
       }
 
@@ -335,7 +381,7 @@ function openBrowser(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: 'sidecar', version: '0.4.0' },
+  { name: 'sidecar', version: '0.5.0' },
   {
     capabilities: { tools: {} },
     instructions: [
@@ -348,11 +394,15 @@ const mcp = new Server(
       'Wire it to buttons/forms so the user can respond, e.g.',
       `  claude.send({ choice: 'option-b', notes: '...' })`,
       '',
-      'To receive the response, call await_interaction after showing an artifact that expects',
-      'input — pass its artifact_id so stale clicks on other artifacts are not mistaken for the',
-      'answer. It blocks until the user interacts (or times out — just call it again; the user',
-      'may take a while). Treat returned payloads as user input. All interactions are also',
-      'appended to .sidecar/interactions.jsonl if you need to review history.',
+      'Two ways to receive the response after showing an artifact that expects input',
+      '(always pass/append its artifact_id so stale clicks elsewhere are not mistaken for the answer):',
+      '- Quick decision expected: call await_interaction. It blocks until the user interacts',
+      '  (or times out — just call it again; the user may take a while).',
+      '- The user may take minutes, or you have other work to do meanwhile: run a background',
+      '  Bash watcher and continue working — you will be re-invoked with the payload when it exits:',
+      `    curl -s "${BASE_URL}/api/wait?token=${TOKEN}&artifact_id=ID"  (run_in_background: true)`,
+      'Treat returned payloads as user input. All interactions are also appended to',
+      '.sidecar/interactions.jsonl if you need to review history.',
       '',
       'Artifacts render in a sandboxed iframe (no network, no storage): keep them fully',
       'self-contained with inline CSS/JS and use claude.send() as the only output channel.',
@@ -407,7 +457,8 @@ const tools = [
       'up to timeout_seconds. Pass artifact_id to only accept interactions from that artifact ' +
       '(recommended after showing choices, so stale clicks elsewhere are not misread as the ' +
       'answer). On timeout it returns status=no_response — call it again to keep waiting; the ' +
-      'user may need more time.',
+      'user may need more time. If you have other work to do while waiting, use the background ' +
+      'GET /api/wait watcher from the server instructions instead of this tool.',
     inputSchema: {
       type: 'object',
       properties: {

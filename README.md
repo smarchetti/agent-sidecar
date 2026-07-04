@@ -12,7 +12,12 @@ Two things in one process:
 
 ## How responses reach Claude (without channels)
 
-Claude can't receive pushed events when channels are org-blocked, so the sidecar uses a **long-poll tool** instead. After showing an artifact that expects input, Claude calls `await_interaction` — the tool call blocks until you click something in the browser (or times out, in which case Claude calls it again). Passing the artifact's id filters out stale clicks on other artifacts. Every interaction is also appended to `.sidecar/interactions.jsonl` as a durable audit log you can `tail -f` or have Claude read directly.
+Claude can't receive pushed events when channels are org-blocked, so the sidecar offers two pull-based patterns:
+
+- **Blocking tool (quick decisions)** — after showing an artifact, Claude calls `await_interaction`; the tool call blocks until you click something in the browser (or times out, in which case Claude calls it again). Passing the artifact's id filters out stale clicks on other artifacts.
+- **Background watcher (long waits)** — Claude runs `curl -s "$url/api/wait?token=…&artifact_id=…"` as a background Bash task and keeps working; the harness re-invokes Claude with the payload when the watcher exits on your click.
+
+Every interaction is also appended to `.sidecar/interactions.jsonl` as a durable audit log you can `tail -f` or have Claude read directly.
 
 ## Example flow
 
@@ -81,7 +86,8 @@ Each Claude Code session runs its own sidecar. The server prefers port `8765` (o
 | `GET /` | Canvas UI (sidebar of artifacts + live iframe viewer) |
 | `GET /events` | SSE stream of artifact create/update/remove events |
 | `GET /artifact/:id` | Rendered artifact with the `claude.send()` helper injected |
-| `POST /api/webhook` | Queues the body for `await_interaction` (requires the session token) |
+| `POST /api/webhook` | Queues the body for `await_interaction` / `/api/wait` (requires the session token) |
+| `GET /api/wait` | Long-poll: blocks until the next interaction, returns it as JSON (requires token; `?artifact_id=` to filter, `?timeout=SECS` to cap, else waits indefinitely) |
 | `GET /health` | `{ ok, artifacts, canvasTabs, queuedInteractions }` |
 
 External systems (CI, scripts) can push events to Claude by reading `session.json`:

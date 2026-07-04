@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 — 2026-07-04
+
+- New `GET /api/wait` long-poll endpoint: blocks until the next interaction and returns it as JSON (token-gated; `artifact_id` filter, optional `timeout` cap, waits indefinitely by default). Lets Claude run a background `curl` watcher and keep working instead of parking on the blocking tool — server instructions now teach both patterns and include the ready-to-run command.
+
 ## 0.4.0 — 2026-07-03
 
 Production hardening.
