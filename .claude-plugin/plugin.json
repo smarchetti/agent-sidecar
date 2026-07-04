@@ -1,6 +1,6 @@
 {
   "name": "sidecar",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A visual canvas for Claude Code: Claude shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation.",
   "author": {
     "name": "Sean Marchetti"

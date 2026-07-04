@@ -1,9 +1,13 @@
 {
   "name": "agent-sidecar",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "module": "sidecar.ts",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.2"
+  },
   "scripts": {
     "build": "bun build sidecar.ts --target=bun --outfile=dist/sidecar.js"
   },
