@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "sidecar": { "command": "bun", "args": ["./sidecar.ts"] }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "agent-sidecar",
+  "version": "0.3.0",
+  "module": "sidecar.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "bun build sidecar.ts --target=bun --outfile=dist/sidecar.js"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}
