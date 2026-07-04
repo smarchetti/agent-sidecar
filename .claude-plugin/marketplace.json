@@ -1,0 +1,13 @@
+{
+  "name": "agent-sidecar",
+  "owner": {
+    "name": "Sean Marchetti"
+  },
+  "plugins": [
+    {
+      "name": "sidecar",
+      "source": "./",
+      "description": "A visual canvas for Claude Code: Claude shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation."
+    }
+  ]
+}
