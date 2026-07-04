@@ -109,11 +109,13 @@
       <div class="logo">✳</div>
       <div>Artifacts Claude creates will appear here.</div>
     </div>
-    <iframe id="viewer" style="display:none" title="artifact"></iframe>
+    <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
+    <iframe id="viewer" style="display:none" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
   </div>
   <div id="toast">✓ Sent to Claude</div>
 
 <script>
+  const TOKEN = '__SIDECAR_TOKEN__' // injected by the server when this page is served
   const list = document.getElementById('artifact-list')
   const emptyNote = document.getElementById('empty-note')
   const viewer = document.getElementById('viewer')
@@ -143,6 +145,10 @@
     }
   }
 
+  function newestId() {
+    return [...artifactsById.values()].sort((a, b) => a.createdAt - b.createdAt).pop().id
+  }
+
   function select(id) {
     const a = artifactsById.get(id)
     if (!a) return
@@ -162,6 +168,8 @@
     renderList()
   }
 
+  let firstSnapshot = true
+
   function connect() {
     const es = new EventSource('/events')
     es.onopen = () => statusDot.classList.add('connected')
@@ -170,9 +178,12 @@
       const msg = JSON.parse(ev.data)
       if (msg.type === 'snapshot') {
         artifactsById = new Map(msg.artifacts.map(a => [a.id, a]))
-        const wanted = location.hash.slice(1)
+        // honor a deep-link hash on initial load only; on reconnect snapshots,
+        // jump to the newest artifact so focus events missed offline aren't lost
+        const wanted = firstSnapshot ? location.hash.slice(1) : ''
+        firstSnapshot = false
         if (wanted && artifactsById.has(wanted)) select(wanted)
-        else if (artifactsById.size) select([...artifactsById.values()].pop().id)
+        else if (artifactsById.size) select(newestId())
         else showEmptyViewer()
       } else if (msg.type === 'created') {
         artifactsById.set(msg.artifact.id, msg.artifact)
@@ -192,9 +203,22 @@
   }
   connect()
 
-  // artifacts postMessage after claude.send() so we can confirm visually
-  window.addEventListener('message', ev => {
-    if (ev.data && ev.data.type === 'sidecar:sent') {
+  // Send bridge: the sandboxed artifact iframe can't reach the server directly,
+  // so claude.send() posts here and we forward it with the session token.
+  window.addEventListener('message', async ev => {
+    const d = ev.data
+    if (!d || d.type !== 'sidecar:send' || ev.source !== viewer.contentWindow) return
+    let ok = false
+    try {
+      const res = await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
+        body: JSON.stringify({ artifactId: d.artifactId, payload: d.payload }),
+      })
+      ok = res.ok
+    } catch {}
+    ev.source.postMessage({ type: 'sidecar:sent', id: d.id, ok }, '*')
+    if (ok) {
       toast.classList.add('show')
       setTimeout(() => toast.classList.remove('show'), 1800)
     }

@@ -14066,8 +14066,10 @@ class StdioServerTransport {
 }
 
 // sidecar.ts
-import { appendFile, mkdir } from "fs/promises";
+import { appendFile, mkdir, rename, stat, writeFile } from "fs/promises";
+import { readFileSync, unlinkSync } from "fs";
 import { join } from "path";
+import { randomBytes } from "crypto";
 
 // canvas.html
 var canvas_default = `<!doctype html>
@@ -14181,11 +14183,13 @@ var canvas_default = `<!doctype html>
       <div class="logo">\u2733</div>
       <div>Artifacts Claude creates will appear here.</div>
     </div>
-    <iframe id="viewer" style="display:none" title="artifact"></iframe>
+    <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
+    <iframe id="viewer" style="display:none" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
   </div>
   <div id="toast">\u2713 Sent to Claude</div>
 
 <script>
+  const TOKEN = '__SIDECAR_TOKEN__' // injected by the server when this page is served
   const list = document.getElementById('artifact-list')
   const emptyNote = document.getElementById('empty-note')
   const viewer = document.getElementById('viewer')
@@ -14215,6 +14219,10 @@ var canvas_default = `<!doctype html>
     }
   }
 
+  function newestId() {
+    return [...artifactsById.values()].sort((a, b) => a.createdAt - b.createdAt).pop().id
+  }
+
   function select(id) {
     const a = artifactsById.get(id)
     if (!a) return
@@ -14234,6 +14242,8 @@ var canvas_default = `<!doctype html>
     renderList()
   }
 
+  let firstSnapshot = true
+
   function connect() {
     const es = new EventSource('/events')
     es.onopen = () => statusDot.classList.add('connected')
@@ -14242,9 +14252,12 @@ var canvas_default = `<!doctype html>
       const msg = JSON.parse(ev.data)
       if (msg.type === 'snapshot') {
         artifactsById = new Map(msg.artifacts.map(a => [a.id, a]))
-        const wanted = location.hash.slice(1)
+        // honor a deep-link hash on initial load only; on reconnect snapshots,
+        // jump to the newest artifact so focus events missed offline aren't lost
+        const wanted = firstSnapshot ? location.hash.slice(1) : ''
+        firstSnapshot = false
         if (wanted && artifactsById.has(wanted)) select(wanted)
-        else if (artifactsById.size) select([...artifactsById.values()].pop().id)
+        else if (artifactsById.size) select(newestId())
         else showEmptyViewer()
       } else if (msg.type === 'created') {
         artifactsById.set(msg.artifact.id, msg.artifact)
@@ -14264,9 +14277,22 @@ var canvas_default = `<!doctype html>
   }
   connect()
 
-  // artifacts postMessage after claude.send() so we can confirm visually
-  window.addEventListener('message', ev => {
-    if (ev.data && ev.data.type === 'sidecar:sent') {
+  // Send bridge: the sandboxed artifact iframe can't reach the server directly,
+  // so claude.send() posts here and we forward it with the session token.
+  window.addEventListener('message', async ev => {
+    const d = ev.data
+    if (!d || d.type !== 'sidecar:send' || ev.source !== viewer.contentWindow) return
+    let ok = false
+    try {
+      const res = await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
+        body: JSON.stringify({ artifactId: d.artifactId, payload: d.payload }),
+      })
+      ok = res.ok
+    } catch {}
+    ev.source.postMessage({ type: 'sidecar:sent', id: d.id, ok }, '*')
+    if (ok) {
       toast.classList.add('show')
       setTimeout(() => toast.classList.remove('show'), 1800)
     }
@@ -14277,29 +14303,50 @@ var canvas_default = `<!doctype html>
 `;
 
 // sidecar.ts
-var canvasHtml = canvas_default;
-var PORT = Number(process.env.SIDECAR_PORT ?? 8765);
-var BASE_URL = `http://127.0.0.1:${PORT}`;
+var canvasTemplate = canvas_default;
 var DATA_DIR = join(process.cwd(), ".sidecar");
+var SESSION_FILE = join(DATA_DIR, "session.json");
+var ARTIFACTS_FILE = join(DATA_DIR, "artifacts.json");
 var INTERACTIONS_FILE = join(DATA_DIR, "interactions.jsonl");
+var MAX_LOG_BYTES = 5000000;
+var TOKEN = randomBytes(16).toString("hex");
+await mkdir(DATA_DIR, { recursive: true });
 var artifacts = new Map;
 var nextArtifactNum = 1;
+try {
+  const saved = await Bun.file(ARTIFACTS_FILE).json();
+  for (const a of saved.artifacts ?? [])
+    artifacts.set(a.id, a);
+  nextArtifactNum = saved.nextArtifactNum ?? artifacts.size + 1;
+} catch {}
+async function persistArtifacts() {
+  await writeFile(ARTIFACTS_FILE, JSON.stringify({ nextArtifactNum, artifacts: [...artifacts.values()] }));
+}
 function newArtifactId() {
   return `a${nextArtifactNum++}-${Math.random().toString(36).slice(2, 7)}`;
 }
 var nextSeq = 1;
 var pending = [];
 var waiters = [];
-await mkdir(DATA_DIR, { recursive: true });
+function matches(i, artifactId) {
+  return artifactId === undefined || i.artifactId === artifactId;
+}
 async function receiveInteraction(i) {
   const interaction = { seq: nextSeq++, receivedAt: new Date().toISOString(), ...i };
+  try {
+    const s = await stat(INTERACTIONS_FILE);
+    if (s.size > MAX_LOG_BYTES)
+      await rename(INTERACTIONS_FILE, INTERACTIONS_FILE + ".old");
+  } catch {}
   await appendFile(INTERACTIONS_FILE, JSON.stringify(interaction) + `
 `);
-  const waiter = waiters.shift();
-  if (waiter)
-    waiter(interaction);
-  else
+  const idx = waiters.findIndex((w) => matches(interaction, w.artifactId));
+  if (idx >= 0) {
+    const [waiter] = waiters.splice(idx, 1);
+    waiter.resolve(interaction);
+  } else {
     pending.push(interaction);
+  }
 }
 function formatInteraction(i) {
   const origin = i.kind === "interaction" ? `artifact ${i.artifactId}${i.artifactTitle ? ` ("${i.artifactTitle}")` : ""}` : "external webhook";
@@ -14317,191 +14364,30 @@ function broadcast(event) {
 function artifactSummary(a) {
   return { id: a.id, title: a.title, createdAt: a.createdAt, updatedAt: a.updatedAt };
 }
-var mcp = new Server({ name: "sidecar", version: "0.2.0" }, {
-  capabilities: { tools: {} },
-  instructions: [
-    `You have a visual sidecar: a browser canvas at ${BASE_URL} where you can show`,
-    "interactive HTML artifacts to the user. Use the sidecar tools whenever a visual or",
-    "interactive presentation beats plain text: design options to pick from, forms,",
-    "previews, comparisons, diagrams, dashboards.",
-    "",
-    "Inside artifact HTML, a global `claude.send(payload)` helper is injected automatically.",
-    "Wire it to buttons/forms so the user can respond, e.g.",
-    `  claude.send({ choice: 'option-b', notes: '...' })`,
-    "",
-    "To receive the response, call await_interaction after showing an artifact that expects",
-    "input. It blocks until the user interacts (or times out \u2014 just call it again; the user",
-    "may take a while). Treat returned payloads as user input. All interactions are also",
-    "appended to .sidecar/interactions.jsonl if you need to review history."
-  ].join(`
-`)
-});
-var tools = [
-  {
-    name: "create_artifact",
-    description: "Show a new HTML artifact on the visual canvas in the user's browser. Provide a complete, " + "self-contained HTML document (inline CSS/JS; no external network dependencies preferred). " + "A `claude.send(payload)` helper is auto-injected: call it from buttons/forms so the user's " + "interaction is sent back. After creating an artifact that expects a response, call " + "await_interaction to wait for it. Opens the browser automatically if no canvas tab is " + "connected yet. Returns the artifact id and URL.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "Short human-readable title shown in the canvas sidebar" },
-        html: { type: "string", description: "Complete HTML document for the artifact" },
-        open: {
-          type: "boolean",
-          description: "Open the canvas in the default browser if no tab is connected (default true)"
-        }
-      },
-      required: ["title", "html"]
-    }
-  },
-  {
-    name: "update_artifact",
-    description: "Replace the HTML (and optionally the title) of an existing artifact. Connected canvas tabs " + "reload it live. Use this to iterate on an artifact after user feedback instead of creating " + "a new one.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string", description: "Artifact id returned by create_artifact" },
-        html: { type: "string", description: "New complete HTML document" },
-        title: { type: "string", description: "New title (optional)" }
-      },
-      required: ["id", "html"]
-    }
-  },
-  {
-    name: "await_interaction",
-    description: "Wait for the user to interact with an artifact (or for an external webhook POST). Returns " + "the oldest unconsumed interaction immediately if one is queued; otherwise blocks up to " + "timeout_seconds. On timeout it returns status=no_response \u2014 call it again to keep waiting; " + "the user may need more time. Payloads come from claude.send(...) calls in artifact HTML.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        timeout_seconds: {
-          type: "number",
-          description: "How long to block waiting (default 25, max 120)"
-        }
-      }
-    }
-  },
-  {
-    name: "get_interactions",
-    description: "Drain all queued interactions without blocking. Use to check whether the user clicked " + "something while you were doing other work.",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "list_artifacts",
-    description: "List artifacts currently on the canvas (id, title, timestamps).",
-    inputSchema: { type: "object", properties: {} }
-  },
-  {
-    name: "remove_artifact",
-    description: "Remove an artifact from the canvas.",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string", description: "Artifact id to remove" } },
-      required: ["id"]
-    }
-  }
-];
-mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-function textResult(text) {
-  return { content: [{ type: "text", text }] };
-}
-mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const args = req.params.arguments ?? {};
-  switch (req.params.name) {
-    case "create_artifact": {
-      const id = newArtifactId();
-      const now = Date.now();
-      const artifact = {
-        id,
-        title: String(args.title ?? "Untitled"),
-        html: String(args.html ?? ""),
-        createdAt: now,
-        updatedAt: now
-      };
-      artifacts.set(id, artifact);
-      broadcast({ type: "created", artifact: artifactSummary(artifact) });
-      const url = `${BASE_URL}/#${id}`;
-      let opened = false;
-      if (args.open !== false && sseClients.size === 0 && process.platform === "darwin") {
-        Bun.spawn(["open", url]);
-        opened = true;
-      }
-      return textResult(`Artifact created: id=${id} url=${url}` + (opened ? " (opened in browser)" : ` (${sseClients.size} canvas tab(s) already connected)`));
-    }
-    case "update_artifact": {
-      const artifact = artifacts.get(String(args.id));
-      if (!artifact)
-        return textResult(`No artifact with id ${args.id}. Use list_artifacts.`);
-      artifact.html = String(args.html ?? artifact.html);
-      if (typeof args.title === "string")
-        artifact.title = args.title;
-      artifact.updatedAt = Date.now();
-      broadcast({ type: "updated", artifact: artifactSummary(artifact) });
-      return textResult(`Artifact ${artifact.id} updated (canvas tabs reloaded).`);
-    }
-    case "await_interaction": {
-      const queued = pending.shift();
-      if (queued)
-        return textResult(`status=received
-${formatInteraction(queued)}`);
-      const timeoutSec = Math.min(Math.max(Number(args.timeout_seconds) || 25, 1), 120);
-      const interaction = await new Promise((resolve) => {
-        const waiter = (i) => {
-          clearTimeout(timer);
-          resolve(i);
-        };
-        const timer = setTimeout(() => {
-          const idx = waiters.indexOf(waiter);
-          if (idx >= 0)
-            waiters.splice(idx, 1);
-          resolve(null);
-        }, timeoutSec * 1000);
-        waiters.push(waiter);
-      });
-      if (!interaction) {
-        return textResult(`status=no_response after ${timeoutSec}s. The user hasn't interacted yet \u2014 ` + "call await_interaction again to keep waiting.");
-      }
-      return textResult(`status=received
-${formatInteraction(interaction)}`);
-    }
-    case "get_interactions": {
-      if (pending.length === 0)
-        return textResult("No queued interactions.");
-      const drained = pending.splice(0, pending.length);
-      return textResult(drained.map(formatInteraction).join(`
-
-`));
-    }
-    case "list_artifacts": {
-      if (artifacts.size === 0)
-        return textResult("No artifacts on the canvas.");
-      const lines = [...artifacts.values()].map((a) => `${a.id}	"${a.title}"	created ${new Date(a.createdAt).toISOString()}`);
-      return textResult(lines.join(`
-`));
-    }
-    case "remove_artifact": {
-      const id = String(args.id);
-      if (!artifacts.delete(id))
-        return textResult(`No artifact with id ${id}.`);
-      broadcast({ type: "removed", artifact: { id } });
-      return textResult(`Artifact ${id} removed.`);
-    }
-    default:
-      throw new Error(`unknown tool: ${req.params.name}`);
-  }
-});
-await mcp.connect(new StdioServerTransport);
 function helperScript(artifactId) {
   return `<script>
-window.claude = {
-  send: async function (payload) {
-    const res = await fetch('/api/webhook', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artifactId: ${JSON.stringify(artifactId)}, payload: payload }),
-    })
-    try { parent.postMessage({ type: 'sidecar:sent', ok: res.ok }, '*') } catch (e) {}
-    return res.ok
-  },
-}
+(function () {
+  var seq = 0, sends = {}, lastPayload = null, lastTime = 0
+  window.addEventListener('message', function (ev) {
+    var d = ev.data
+    if (d && d.type === 'sidecar:sent' && sends[d.id]) { sends[d.id](!!d.ok); delete sends[d.id] }
+  })
+  window.claude = {
+    send: function (payload) {
+      var json = JSON.stringify(payload === undefined ? null : payload)
+      var now = Date.now()
+      // debounce accidental double-clicks: identical payload within 1.5s is dropped
+      if (json === lastPayload && now - lastTime < 1500) return Promise.resolve(false)
+      lastPayload = json; lastTime = now
+      var id = ++seq
+      return new Promise(function (resolve) {
+        sends[id] = resolve
+        parent.postMessage({ type: 'sidecar:send', id: id, artifactId: ${JSON.stringify(artifactId)}, payload: payload }, '*')
+        setTimeout(function () { if (sends[id]) { delete sends[id]; resolve(false) } }, 5000)
+      })
+    },
+  }
+})()
 </script>`;
 }
 function renderArtifact(a) {
@@ -14510,8 +14396,8 @@ function renderArtifact(a) {
     return a.html.replace(/<head[^>]*>/i, (m) => m + helper);
   return helper + a.html;
 }
-Bun.serve({
-  port: PORT,
+var canvasHtml = canvasTemplate.replace("__SIDECAR_TOKEN__", TOKEN);
+var serveOptions = {
   hostname: "127.0.0.1",
   idleTimeout: 0,
   async fetch(req) {
@@ -14559,6 +14445,10 @@ Bun.serve({
       });
     }
     if (req.method === "POST" && url.pathname === "/api/webhook") {
+      const provided = req.headers.get("x-sidecar-token") ?? url.searchParams.get("token") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+      if (provided !== TOKEN) {
+        return new Response("missing or invalid token (see .sidecar/session.json)", { status: 403 });
+      }
       const raw = await req.text();
       let parsed;
       try {
@@ -14581,5 +14471,223 @@ Bun.serve({
     }
     return new Response("not found", { status: 404 });
   }
+};
+function startHttp() {
+  const preferred = Number(process.env.SIDECAR_PORT ?? 8765);
+  try {
+    return Bun.serve({ ...serveOptions, port: preferred });
+  } catch (err) {
+    if (preferred === 0)
+      throw err;
+    console.error(`[sidecar] port ${preferred} in use, falling back to an ephemeral port`);
+    return Bun.serve({ ...serveOptions, port: 0 });
+  }
+}
+var httpServer = startHttp();
+var PORT = httpServer.port;
+var BASE_URL = `http://127.0.0.1:${PORT}`;
+await writeFile(SESSION_FILE, JSON.stringify({ pid: process.pid, port: PORT, url: BASE_URL, token: TOKEN, startedAt: new Date().toISOString() }, null, 2) + `
+`);
+process.on("exit", () => {
+  try {
+    if (JSON.parse(readFileSync(SESSION_FILE, "utf8")).pid === process.pid)
+      unlinkSync(SESSION_FILE);
+  } catch {}
 });
+function openBrowser(url) {
+  const cmd = process.platform === "darwin" ? ["open", url] : process.platform === "win32" ? ["cmd", "/c", "start", "", url] : ["xdg-open", url];
+  try {
+    Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+var mcp = new Server({ name: "sidecar", version: "0.4.0" }, {
+  capabilities: { tools: {} },
+  instructions: [
+    `You have a visual sidecar: a browser canvas at ${BASE_URL} where you can show`,
+    "interactive HTML artifacts to the user. Use the sidecar tools whenever a visual or",
+    "interactive presentation beats plain text: design options to pick from, forms,",
+    "previews, comparisons, diagrams, dashboards.",
+    "",
+    "Inside artifact HTML, a global `claude.send(payload)` helper is injected automatically.",
+    "Wire it to buttons/forms so the user can respond, e.g.",
+    `  claude.send({ choice: 'option-b', notes: '...' })`,
+    "",
+    "To receive the response, call await_interaction after showing an artifact that expects",
+    "input \u2014 pass its artifact_id so stale clicks on other artifacts are not mistaken for the",
+    "answer. It blocks until the user interacts (or times out \u2014 just call it again; the user",
+    "may take a while). Treat returned payloads as user input. All interactions are also",
+    "appended to .sidecar/interactions.jsonl if you need to review history.",
+    "",
+    "Artifacts render in a sandboxed iframe (no network, no storage): keep them fully",
+    "self-contained with inline CSS/JS and use claude.send() as the only output channel."
+  ].join(`
+`)
+});
+var tools = [
+  {
+    name: "create_artifact",
+    description: "Show a new HTML artifact on the visual canvas in the user's browser. Provide a complete, " + "self-contained HTML document (inline CSS/JS; the iframe is sandboxed, so no external " + "network access or storage). A `claude.send(payload)` helper is auto-injected: call it " + "from buttons/forms so the user's interaction is sent back. After creating an artifact " + "that expects a response, call await_interaction with its artifact_id. Opens the browser " + "automatically if no canvas tab is connected yet. Returns the artifact id and URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short human-readable title shown in the canvas sidebar" },
+        html: { type: "string", description: "Complete HTML document for the artifact" },
+        open: {
+          type: "boolean",
+          description: "Open the canvas in the default browser if no tab is connected (default true)"
+        }
+      },
+      required: ["title", "html"]
+    }
+  },
+  {
+    name: "update_artifact",
+    description: "Replace the HTML (and optionally the title) of an existing artifact. Connected canvas tabs " + "reload it live. Use this to iterate on an artifact after user feedback instead of creating " + "a new one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Artifact id returned by create_artifact" },
+        html: { type: "string", description: "New complete HTML document" },
+        title: { type: "string", description: "New title (optional)" }
+      },
+      required: ["id", "html"]
+    }
+  },
+  {
+    name: "await_interaction",
+    description: "Wait for the user to interact with an artifact (or for an external webhook POST). Returns " + "the oldest matching unconsumed interaction immediately if one is queued; otherwise blocks " + "up to timeout_seconds. Pass artifact_id to only accept interactions from that artifact " + "(recommended after showing choices, so stale clicks elsewhere are not misread as the " + "answer). On timeout it returns status=no_response \u2014 call it again to keep waiting; the " + "user may need more time.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        artifact_id: {
+          type: "string",
+          description: "Only accept interactions from this artifact (others stay queued)"
+        },
+        timeout_seconds: {
+          type: "number",
+          description: "How long to block waiting (default 25, max 120)"
+        }
+      }
+    }
+  },
+  {
+    name: "get_interactions",
+    description: "Drain all queued interactions without blocking. Use to check whether the user clicked " + "something while you were doing other work.",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "list_artifacts",
+    description: "List artifacts currently on the canvas (id, title, timestamps).",
+    inputSchema: { type: "object", properties: {} }
+  },
+  {
+    name: "remove_artifact",
+    description: "Remove an artifact from the canvas.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Artifact id to remove" } },
+      required: ["id"]
+    }
+  }
+];
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+function textResult(text) {
+  return { content: [{ type: "text", text }] };
+}
+mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  const args = req.params.arguments ?? {};
+  switch (req.params.name) {
+    case "create_artifact": {
+      const id = newArtifactId();
+      const now = Date.now();
+      const artifact = {
+        id,
+        title: String(args.title ?? "Untitled"),
+        html: String(args.html ?? ""),
+        createdAt: now,
+        updatedAt: now
+      };
+      artifacts.set(id, artifact);
+      await persistArtifacts();
+      broadcast({ type: "created", artifact: artifactSummary(artifact) });
+      const url = `${BASE_URL}/#${id}`;
+      let opened = false;
+      if (args.open !== false && sseClients.size === 0)
+        opened = openBrowser(url);
+      return textResult(`Artifact created: id=${id} url=${url}` + (opened ? " (opened in browser)" : ` (${sseClients.size} canvas tab(s) already connected)`));
+    }
+    case "update_artifact": {
+      const artifact = artifacts.get(String(args.id));
+      if (!artifact)
+        return textResult(`No artifact with id ${args.id}. Use list_artifacts.`);
+      artifact.html = String(args.html ?? artifact.html);
+      if (typeof args.title === "string")
+        artifact.title = args.title;
+      artifact.updatedAt = Date.now();
+      await persistArtifacts();
+      broadcast({ type: "updated", artifact: artifactSummary(artifact) });
+      return textResult(`Artifact ${artifact.id} updated (canvas tabs reloaded).`);
+    }
+    case "await_interaction": {
+      const artifactId = typeof args.artifact_id === "string" ? args.artifact_id : undefined;
+      const queuedIdx = pending.findIndex((i) => matches(i, artifactId));
+      if (queuedIdx >= 0) {
+        const [queued] = pending.splice(queuedIdx, 1);
+        return textResult(`status=received
+${formatInteraction(queued)}`);
+      }
+      const timeoutSec = Math.min(Math.max(Number(args.timeout_seconds) || 25, 1), 120);
+      const interaction = await new Promise((resolve) => {
+        const waiter = {
+          artifactId,
+          resolve: (i) => {
+            clearTimeout(timer);
+            resolve(i);
+          }
+        };
+        const timer = setTimeout(() => {
+          const idx = waiters.indexOf(waiter);
+          if (idx >= 0)
+            waiters.splice(idx, 1);
+          resolve(null);
+        }, timeoutSec * 1000);
+        waiters.push(waiter);
+      });
+      if (!interaction) {
+        return textResult(`status=no_response after ${timeoutSec}s. The user hasn't interacted yet \u2014 ` + "call await_interaction again to keep waiting.");
+      }
+      return textResult(`status=received
+${formatInteraction(interaction)}`);
+    }
+    case "get_interactions": {
+      if (pending.length === 0)
+        return textResult("No queued interactions.");
+      const drained = pending.splice(0, pending.length);
+      return textResult(drained.map(formatInteraction).join(`
+
+`));
+    }
+    case "list_artifacts": {
+      if (artifacts.size === 0)
+        return textResult("No artifacts on the canvas.");
+      const lines = [...artifacts.values()].map((a) => `${a.id}	"${a.title}"	created ${new Date(a.createdAt).toISOString()}`);
+      return textResult(lines.join(`
+`));
+    }
+    case "remove_artifact": {
+      const id = String(args.id);
+      if (!artifacts.delete(id))
+        return textResult(`No artifact with id ${id}.`);
+      await persistArtifacts();
+      broadcast({ type: "removed", artifact: { id } });
+      return textResult(`Artifact ${id} removed.`);
+    }
+    default:
+      throw new Error(`unknown tool: ${req.params.name}`);
+  }
+});
+await mcp.connect(new StdioServerTransport);
 console.error(`[sidecar] canvas at ${BASE_URL}`);

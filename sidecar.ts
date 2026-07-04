@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * claude-sidecar — an MCP server that gives Claude Code a visual canvas.
+ * agent-sidecar — an MCP server that gives Claude Code a visual canvas.
  *
  * Two halves, one process:
  *  1. MCP server (stdio, spawned by Claude Code) exposing artifact tools plus
@@ -10,26 +10,38 @@
  *     for live updates, and a webhook endpoint. Webhook payloads are queued for
  *     `await_interaction` and appended to .sidecar/interactions.jsonl.
  *
- * No channel capability needed — works on orgs where channels are blocked.
+ * Per-session state lives in .sidecar/ under the project cwd:
+ *   session.json        — port + auth token for this session (for external callers)
+ *   artifacts.json      — canvas contents, restored on restart
+ *   interactions.jsonl  — append-only interaction log, rotated at 5MB
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import { appendFile, mkdir } from 'node:fs/promises'
+import { appendFile, mkdir, rename, stat, writeFile } from 'node:fs/promises'
+import { readFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 // inlined by `bun build`, so dist/sidecar.js is fully self-contained
 // (bun-types mistypes `with { type: 'text' }` imports as HTMLBundle; it's a string at runtime)
-import canvasHtmlImport from './canvas.html' with { type: 'text' }
-const canvasHtml = canvasHtmlImport as unknown as string
+import canvasTemplateImport from './canvas.html' with { type: 'text' }
+const canvasTemplate = canvasTemplateImport as unknown as string
 
-const PORT = Number(process.env.SIDECAR_PORT ?? 8765)
-const BASE_URL = `http://127.0.0.1:${PORT}`
-// cwd is the project Claude Code runs in — logs belong there, not in the plugin dir
+// cwd is the project Claude Code runs in — session state belongs there, not in the plugin dir
 const DATA_DIR = join(process.cwd(), '.sidecar')
+const SESSION_FILE = join(DATA_DIR, 'session.json')
+const ARTIFACTS_FILE = join(DATA_DIR, 'artifacts.json')
 const INTERACTIONS_FILE = join(DATA_DIR, 'interactions.jsonl')
+const MAX_LOG_BYTES = 5_000_000
+
+// Required on every webhook POST. Without it, any webpage the user visits could
+// fire cross-site POSTs at localhost and inject text in front of Claude.
+const TOKEN = randomBytes(16).toString('hex')
+
+await mkdir(DATA_DIR, { recursive: true })
 
 // ---------------------------------------------------------------------------
-// Artifact store
+// Artifact store (persisted so a session restart doesn't empty the canvas)
 // ---------------------------------------------------------------------------
 
 interface Artifact {
@@ -42,6 +54,21 @@ interface Artifact {
 
 const artifacts = new Map<string, Artifact>()
 let nextArtifactNum = 1
+
+try {
+  const saved = await Bun.file(ARTIFACTS_FILE).json()
+  for (const a of saved.artifacts ?? []) artifacts.set(a.id, a)
+  nextArtifactNum = saved.nextArtifactNum ?? artifacts.size + 1
+} catch {
+  // no saved canvas (first run) — start empty
+}
+
+async function persistArtifacts() {
+  await writeFile(
+    ARTIFACTS_FILE,
+    JSON.stringify({ nextArtifactNum, artifacts: [...artifacts.values()] }),
+  )
+}
 
 function newArtifactId(): string {
   return `a${nextArtifactNum++}-${Math.random().toString(36).slice(2, 7)}`
@@ -60,18 +87,37 @@ interface Interaction {
   payload: unknown
 }
 
+interface Waiter {
+  artifactId?: string
+  resolve: (i: Interaction) => void
+}
+
 let nextSeq = 1
 const pending: Interaction[] = []
-const waiters: Array<(i: Interaction) => void> = []
+const waiters: Waiter[] = []
 
-await mkdir(DATA_DIR, { recursive: true })
+function matches(i: Interaction, artifactId?: string): boolean {
+  return artifactId === undefined || i.artifactId === artifactId
+}
 
 async function receiveInteraction(i: Omit<Interaction, 'seq' | 'receivedAt'>) {
   const interaction: Interaction = { seq: nextSeq++, receivedAt: new Date().toISOString(), ...i }
+
+  try {
+    const s = await stat(INTERACTIONS_FILE)
+    if (s.size > MAX_LOG_BYTES) await rename(INTERACTIONS_FILE, INTERACTIONS_FILE + '.old')
+  } catch {
+    // log doesn't exist yet
+  }
   await appendFile(INTERACTIONS_FILE, JSON.stringify(interaction) + '\n')
-  const waiter = waiters.shift()
-  if (waiter) waiter(interaction)
-  else pending.push(interaction)
+
+  const idx = waiters.findIndex(w => matches(interaction, w.artifactId))
+  if (idx >= 0) {
+    const [waiter] = waiters.splice(idx, 1)
+    waiter!.resolve(interaction)
+  } else {
+    pending.push(interaction)
+  }
 }
 
 function formatInteraction(i: Interaction): string {
@@ -98,11 +144,198 @@ function artifactSummary(a: Artifact) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper script injected into every artifact iframe. The iframe is sandboxed
+// (opaque origin, no direct fetch to the server), so sends go over postMessage
+// to the canvas shell, which holds the token and forwards to /api/webhook.
+// ---------------------------------------------------------------------------
+
+function helperScript(artifactId: string): string {
+  return `<script>
+(function () {
+  var seq = 0, sends = {}, lastPayload = null, lastTime = 0
+  window.addEventListener('message', function (ev) {
+    var d = ev.data
+    if (d && d.type === 'sidecar:sent' && sends[d.id]) { sends[d.id](!!d.ok); delete sends[d.id] }
+  })
+  window.claude = {
+    send: function (payload) {
+      var json = JSON.stringify(payload === undefined ? null : payload)
+      var now = Date.now()
+      // debounce accidental double-clicks: identical payload within 1.5s is dropped
+      if (json === lastPayload && now - lastTime < 1500) return Promise.resolve(false)
+      lastPayload = json; lastTime = now
+      var id = ++seq
+      return new Promise(function (resolve) {
+        sends[id] = resolve
+        parent.postMessage({ type: 'sidecar:send', id: id, artifactId: ${JSON.stringify(artifactId)}, payload: payload }, '*')
+        setTimeout(function () { if (sends[id]) { delete sends[id]; resolve(false) } }, 5000)
+      })
+    },
+  }
+})()
+</script>`
+}
+
+function renderArtifact(a: Artifact): string {
+  const helper = helperScript(a.id)
+  // Inject the helper early so artifact scripts can rely on `claude` existing.
+  if (/<head[^>]*>/i.test(a.html)) return a.html.replace(/<head[^>]*>/i, m => m + helper)
+  return helper + a.html
+}
+
+// ---------------------------------------------------------------------------
+// HTTP server: canvas UI, SSE, artifact iframes, webhook receiver.
+// Started before the MCP server so BASE_URL (with the real bound port) can go
+// into Claude's instructions.
+// ---------------------------------------------------------------------------
+
+const canvasHtml = canvasTemplate.replace('__SIDECAR_TOKEN__', TOKEN)
+
+const serveOptions = {
+  hostname: '127.0.0.1', // localhost-only: nothing off this machine can reach it
+  idleTimeout: 0, // keep SSE streams open
+  async fetch(req: Request) {
+    const url = new URL(req.url)
+
+    if (req.method === 'GET' && url.pathname === '/') {
+      return new Response(canvasHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
+
+    if (req.method === 'GET' && url.pathname === '/health') {
+      return Response.json({
+        ok: true,
+        artifacts: artifacts.size,
+        canvasTabs: sseClients.size,
+        queuedInteractions: pending.length,
+      })
+    }
+
+    // SSE stream: canvas tabs subscribe for live artifact create/update/remove
+    if (req.method === 'GET' && url.pathname === '/events') {
+      const stream = new ReadableStream({
+        start(ctrl) {
+          const snapshot = [...artifacts.values()].map(artifactSummary)
+          ctrl.enqueue(`data: ${JSON.stringify({ type: 'snapshot', artifacts: snapshot })}\n\n`)
+          const emit = (chunk: string) => {
+            try {
+              ctrl.enqueue(chunk)
+            } catch {
+              sseClients.delete(emit)
+            }
+          }
+          sseClients.add(emit)
+          req.signal.addEventListener('abort', () => sseClients.delete(emit))
+        },
+      })
+      return new Response(stream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      })
+    }
+
+    // Artifact content, rendered inside the sandboxed canvas iframe
+    const artifactMatch = url.pathname.match(/^\/artifact\/([^/]+)$/)
+    if (req.method === 'GET' && artifactMatch?.[1]) {
+      const artifact = artifacts.get(artifactMatch[1])
+      if (!artifact) return new Response('artifact not found', { status: 404 })
+      return new Response(renderArtifact(artifact), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      })
+    }
+
+    // Webhook receiver: artifact interactions and any external POSTs queue for Claude
+    if (req.method === 'POST' && url.pathname === '/api/webhook') {
+      const provided =
+        req.headers.get('x-sidecar-token') ??
+        url.searchParams.get('token') ??
+        req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
+        ''
+      if (provided !== TOKEN) {
+        return new Response('missing or invalid token (see .sidecar/session.json)', { status: 403 })
+      }
+
+      const raw = await req.text()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        parsed = undefined
+      }
+
+      if (parsed && typeof parsed === 'object' && 'artifactId' in parsed) {
+        // Interaction sent via the injected claude.send() helper
+        const artifactId = String((parsed as Record<string, unknown>).artifactId)
+        await receiveInteraction({
+          kind: 'interaction',
+          artifactId,
+          artifactTitle: artifacts.get(artifactId)?.title,
+          payload: (parsed as Record<string, unknown>).payload,
+        })
+      } else {
+        // External POST (CI, scripts, curl) — forward the body as-is
+        await receiveInteraction({ kind: 'webhook', payload: parsed ?? raw })
+      }
+      return Response.json({ ok: true })
+    }
+
+    return new Response('not found', { status: 404 })
+  },
+}
+
+function startHttp() {
+  const preferred = Number(process.env.SIDECAR_PORT ?? 8765)
+  try {
+    return Bun.serve({ ...serveOptions, port: preferred })
+  } catch (err) {
+    if (preferred === 0) throw err
+    // another session holds the port — take an ephemeral one instead of crashing
+    console.error(`[sidecar] port ${preferred} in use, falling back to an ephemeral port`)
+    return Bun.serve({ ...serveOptions, port: 0 })
+  }
+}
+
+const httpServer = startHttp()
+const PORT = httpServer.port
+const BASE_URL = `http://127.0.0.1:${PORT}`
+
+// Discovery file for this session: external webhook callers read the port and
+// token from here. Removed on clean exit if it's still ours.
+await writeFile(
+  SESSION_FILE,
+  JSON.stringify(
+    { pid: process.pid, port: PORT, url: BASE_URL, token: TOKEN, startedAt: new Date().toISOString() },
+    null,
+    2,
+  ) + '\n',
+)
+process.on('exit', () => {
+  try {
+    if (JSON.parse(readFileSync(SESSION_FILE, 'utf8')).pid === process.pid) unlinkSync(SESSION_FILE)
+  } catch {
+    // someone else's session file (or already gone) — leave it
+  }
+})
+
+function openBrowser(url: string): boolean {
+  const cmd =
+    process.platform === 'darwin'
+      ? ['open', url]
+      : process.platform === 'win32'
+        ? ['cmd', '/c', 'start', '', url]
+        : ['xdg-open', url]
+  try {
+    Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
 // MCP server
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: 'sidecar', version: '0.2.0' },
+  { name: 'sidecar', version: '0.4.0' },
   {
     capabilities: { tools: {} },
     instructions: [
@@ -116,9 +349,13 @@ const mcp = new Server(
       `  claude.send({ choice: 'option-b', notes: '...' })`,
       '',
       'To receive the response, call await_interaction after showing an artifact that expects',
-      'input. It blocks until the user interacts (or times out — just call it again; the user',
+      'input — pass its artifact_id so stale clicks on other artifacts are not mistaken for the',
+      'answer. It blocks until the user interacts (or times out — just call it again; the user',
       'may take a while). Treat returned payloads as user input. All interactions are also',
       'appended to .sidecar/interactions.jsonl if you need to review history.',
+      '',
+      'Artifacts render in a sandboxed iframe (no network, no storage): keep them fully',
+      'self-contained with inline CSS/JS and use claude.send() as the only output channel.',
     ].join('\n'),
   },
 )
@@ -128,11 +365,11 @@ const tools = [
     name: 'create_artifact',
     description:
       'Show a new HTML artifact on the visual canvas in the user\'s browser. Provide a complete, ' +
-      'self-contained HTML document (inline CSS/JS; no external network dependencies preferred). ' +
-      'A `claude.send(payload)` helper is auto-injected: call it from buttons/forms so the user\'s ' +
-      'interaction is sent back. After creating an artifact that expects a response, call ' +
-      'await_interaction to wait for it. Opens the browser automatically if no canvas tab is ' +
-      'connected yet. Returns the artifact id and URL.',
+      'self-contained HTML document (inline CSS/JS; the iframe is sandboxed, so no external ' +
+      'network access or storage). A `claude.send(payload)` helper is auto-injected: call it ' +
+      'from buttons/forms so the user\'s interaction is sent back. After creating an artifact ' +
+      'that expects a response, call await_interaction with its artifact_id. Opens the browser ' +
+      'automatically if no canvas tab is connected yet. Returns the artifact id and URL.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -166,12 +403,18 @@ const tools = [
     name: 'await_interaction',
     description:
       'Wait for the user to interact with an artifact (or for an external webhook POST). Returns ' +
-      'the oldest unconsumed interaction immediately if one is queued; otherwise blocks up to ' +
-      'timeout_seconds. On timeout it returns status=no_response — call it again to keep waiting; ' +
-      'the user may need more time. Payloads come from claude.send(...) calls in artifact HTML.',
+      'the oldest matching unconsumed interaction immediately if one is queued; otherwise blocks ' +
+      'up to timeout_seconds. Pass artifact_id to only accept interactions from that artifact ' +
+      '(recommended after showing choices, so stale clicks elsewhere are not misread as the ' +
+      'answer). On timeout it returns status=no_response — call it again to keep waiting; the ' +
+      'user may need more time.',
     inputSchema: {
       type: 'object',
       properties: {
+        artifact_id: {
+          type: 'string',
+          description: 'Only accept interactions from this artifact (others stay queued)',
+        },
         timeout_seconds: {
           type: 'number',
           description: 'How long to block waiting (default 25, max 120)',
@@ -223,14 +466,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         updatedAt: now,
       }
       artifacts.set(id, artifact)
+      await persistArtifacts()
       broadcast({ type: 'created', artifact: artifactSummary(artifact) })
 
       const url = `${BASE_URL}/#${id}`
       let opened = false
-      if (args.open !== false && sseClients.size === 0 && process.platform === 'darwin') {
-        Bun.spawn(['open', url])
-        opened = true
-      }
+      if (args.open !== false && sseClients.size === 0) opened = openBrowser(url)
       return textResult(
         `Artifact created: id=${id} url=${url}` +
           (opened ? ' (opened in browser)' : ` (${sseClients.size} canvas tab(s) already connected)`),
@@ -243,19 +484,28 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       artifact.html = String(args.html ?? artifact.html)
       if (typeof args.title === 'string') artifact.title = args.title
       artifact.updatedAt = Date.now()
+      await persistArtifacts()
       broadcast({ type: 'updated', artifact: artifactSummary(artifact) })
       return textResult(`Artifact ${artifact.id} updated (canvas tabs reloaded).`)
     }
 
     case 'await_interaction': {
-      const queued = pending.shift()
-      if (queued) return textResult(`status=received\n${formatInteraction(queued)}`)
+      const artifactId = typeof args.artifact_id === 'string' ? args.artifact_id : undefined
+
+      const queuedIdx = pending.findIndex(i => matches(i, artifactId))
+      if (queuedIdx >= 0) {
+        const [queued] = pending.splice(queuedIdx, 1)
+        return textResult(`status=received\n${formatInteraction(queued!)}`)
+      }
 
       const timeoutSec = Math.min(Math.max(Number(args.timeout_seconds) || 25, 1), 120)
       const interaction = await new Promise<Interaction | null>(resolve => {
-        const waiter = (i: Interaction) => {
-          clearTimeout(timer)
-          resolve(i)
+        const waiter: Waiter = {
+          artifactId,
+          resolve: i => {
+            clearTimeout(timer)
+            resolve(i)
+          },
         }
         const timer = setTimeout(() => {
           const idx = waiters.indexOf(waiter)
@@ -291,6 +541,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
     case 'remove_artifact': {
       const id = String(args.id)
       if (!artifacts.delete(id)) return textResult(`No artifact with id ${id}.`)
+      await persistArtifacts()
       broadcast({ type: 'removed', artifact: { id } })
       return textResult(`Artifact ${id} removed.`)
     }
@@ -301,119 +552,5 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 })
 
 await mcp.connect(new StdioServerTransport())
-
-// ---------------------------------------------------------------------------
-// Helper script injected into every artifact iframe
-// ---------------------------------------------------------------------------
-
-function helperScript(artifactId: string): string {
-  return `<script>
-window.claude = {
-  send: async function (payload) {
-    const res = await fetch('/api/webhook', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artifactId: ${JSON.stringify(artifactId)}, payload: payload }),
-    })
-    try { parent.postMessage({ type: 'sidecar:sent', ok: res.ok }, '*') } catch (e) {}
-    return res.ok
-  },
-}
-</script>`
-}
-
-function renderArtifact(a: Artifact): string {
-  const helper = helperScript(a.id)
-  // Inject the helper early so artifact scripts can rely on `claude` existing.
-  if (/<head[^>]*>/i.test(a.html)) return a.html.replace(/<head[^>]*>/i, m => m + helper)
-  return helper + a.html
-}
-
-// ---------------------------------------------------------------------------
-// HTTP server: canvas UI, SSE, artifact iframes, webhook receiver
-// ---------------------------------------------------------------------------
-
-Bun.serve({
-  port: PORT,
-  hostname: '127.0.0.1', // localhost-only: nothing off this machine can reach it
-  idleTimeout: 0, // keep SSE streams open
-  async fetch(req) {
-    const url = new URL(req.url)
-
-    if (req.method === 'GET' && url.pathname === '/') {
-      return new Response(canvasHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-    }
-
-    if (req.method === 'GET' && url.pathname === '/health') {
-      return Response.json({
-        ok: true,
-        artifacts: artifacts.size,
-        canvasTabs: sseClients.size,
-        queuedInteractions: pending.length,
-      })
-    }
-
-    // SSE stream: canvas tabs subscribe for live artifact create/update/remove
-    if (req.method === 'GET' && url.pathname === '/events') {
-      const stream = new ReadableStream({
-        start(ctrl) {
-          const snapshot = [...artifacts.values()].map(artifactSummary)
-          ctrl.enqueue(`data: ${JSON.stringify({ type: 'snapshot', artifacts: snapshot })}\n\n`)
-          const emit = (chunk: string) => {
-            try {
-              ctrl.enqueue(chunk)
-            } catch {
-              sseClients.delete(emit)
-            }
-          }
-          sseClients.add(emit)
-          req.signal.addEventListener('abort', () => sseClients.delete(emit))
-        },
-      })
-      return new Response(stream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
-      })
-    }
-
-    // Artifact content, rendered inside the canvas iframe
-    const artifactMatch = url.pathname.match(/^\/artifact\/([^/]+)$/)
-    if (req.method === 'GET' && artifactMatch?.[1]) {
-      const artifact = artifacts.get(artifactMatch[1])
-      if (!artifact) return new Response('artifact not found', { status: 404 })
-      return new Response(renderArtifact(artifact), {
-        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-      })
-    }
-
-    // Webhook receiver: artifact interactions and any external POSTs queue for Claude
-    if (req.method === 'POST' && url.pathname === '/api/webhook') {
-      const raw = await req.text()
-
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch {
-        parsed = undefined
-      }
-
-      if (parsed && typeof parsed === 'object' && 'artifactId' in parsed) {
-        // Interaction sent via the injected claude.send() helper
-        const artifactId = String((parsed as Record<string, unknown>).artifactId)
-        await receiveInteraction({
-          kind: 'interaction',
-          artifactId,
-          artifactTitle: artifacts.get(artifactId)?.title,
-          payload: (parsed as Record<string, unknown>).payload,
-        })
-      } else {
-        // External POST (CI, scripts, curl) — forward the body as-is
-        await receiveInteraction({ kind: 'webhook', payload: parsed ?? raw })
-      }
-      return Response.json({ ok: true })
-    }
-
-    return new Response('not found', { status: 404 })
-  },
-})
 
 console.error(`[sidecar] canvas at ${BASE_URL}`)
