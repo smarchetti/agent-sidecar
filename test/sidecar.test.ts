@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const REPO = join(import.meta.dir, '..')
-const SERVER = join(REPO, 'sidecar.ts')
+const SERVER = join(REPO, 'src', 'sidecar.ts')
 const WORKDIR = mkdtempSync(join(tmpdir(), 'sidecar-test-'))
 
 interface Session {

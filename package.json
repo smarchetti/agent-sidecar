@@ -27,7 +27,7 @@
     "bun": ">=1.2"
   },
   "scripts": {
-    "build": "bun build sidecar.ts --target=bun --outfile=dist/sidecar.js",
+    "build": "bun build src/sidecar.ts --target=bun --outfile=dist/sidecar.js",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
