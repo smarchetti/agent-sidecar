@@ -5,138 +5,191 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — agent-sidecar</title>
 <meta name="description" content="Documentation for agent-sidecar: installation, MCP tools, HTTP API, writing artifacts, security model, and development guide." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23d97757'%3E✳%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23ff9e64'%3E✳%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,800&family=Martian+Mono:wght@400;600&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --cream: #faf5ec;
-    --cream-2: #f3e9da;
-    --terra: #d97757;
-    --terra-dark: #b85c3e;
-    --ink: #3d2c23;
-    --ink-soft: #8a6f5d;
-    --white: #fffdf9;
-    --code-bg: #2b2018;
-    --code-fg: #e8d9c8;
-    --code-dim: #907a66;
-    --code-hl: #f0a888;
+    --ink-0: oklch(15.5% 0.012 55);
+    --ink-1: oklch(19% 0.014 55);
+    --ink-2: oklch(24% 0.018 55);
+    --line: oklch(31% 0.02 55);
+    --text: oklch(93% 0.012 65);
+    --text-dim: oklch(76% 0.022 60);
+    --ember: oklch(74% 0.155 45);
+    --ember-hot: oklch(81% 0.16 55);
+    --ember-ink: oklch(22% 0.05 45);
+    --font-sans: "Bricolage Grotesque", system-ui, sans-serif;
+    --font-mono: "Martian Mono", ui-monospace, monospace;
+    --z-nav: 10;
   }
   * { box-sizing: border-box; margin: 0; }
-  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  html { scroll-behavior: smooth; scroll-padding-top: 84px; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--cream);
-    color: var(--ink);
-    line-height: 1.6;
+    font-family: var(--font-sans);
+    background: var(--ink-0);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 16px;
+    overflow-x: clip;
   }
-  .display { font-family: Georgia, "Times New Roman", serif; letter-spacing: -0.5px; }
-  a { color: var(--terra-dark); }
+  ::selection { background: var(--ember); color: var(--ember-ink); }
+  h1, h2, h3 { text-wrap: balance; }
+  .wrap { max-width: 1160px; margin: 0 auto; padding-inline: clamp(20px, 4vw, 48px); }
 
-  /* top nav (matches index) */
+  /* ---------- shared shell: nav (identical to index) ---------- */
   .topnav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 48px; max-width: 1280px; margin: 0 auto;
+    position: sticky; top: 0; z-index: var(--z-nav);
+    background: oklch(15.5% 0.012 55 / 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
   }
-  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--ink); text-decoration: none; }
-  .logo .mark { color: var(--terra); font-size: 22px; }
-  .topnav .links { display: flex; gap: 28px; font-size: 14px; }
-  .topnav .links a { color: var(--ink-soft); text-decoration: none; }
-  .topnav .links a:hover, .topnav .links a.here { color: var(--ink); }
-  .gh {
-    padding: 8px 18px; border-radius: 999px; background: var(--ink); color: var(--cream);
-    font-size: 13px; font-weight: 600; text-decoration: none;
+  .topnav .bar { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand {
+    display: flex; align-items: baseline; gap: 9px;
+    font-weight: 600; font-size: 17px; text-decoration: none; letter-spacing: -0.01em; color: var(--text);
+    white-space: nowrap;
   }
+  .brand .mark { color: var(--ember); font-size: 19px; }
+  .topnav .links { display: flex; align-items: center; gap: clamp(14px, 3vw, 30px); font-size: 14px; }
+  .topnav .links a { color: var(--text-dim); text-decoration: none; }
+  .topnav .links a:hover, .topnav .links a[aria-current] { color: var(--text); }
+  .nav-cta {
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    color: var(--ember-ink) !important; background: var(--ember);
+    padding: 8px 15px; border-radius: 7px; text-decoration: none;
+  }
+  .nav-cta:hover { background: var(--ember-hot); }
 
-  /* layout */
-  .wrap { max-width: 1280px; margin: 0 auto; padding: 12px 48px 100px; display: flex; gap: 56px; align-items: flex-start; }
+  /* ---------- docs layout ---------- */
+  .layout { display: flex; gap: clamp(32px, 5vw, 64px); align-items: flex-start; padding-top: 28px; }
   aside {
-    position: sticky; top: 24px; width: 220px; flex-shrink: 0;
-    max-height: calc(100vh - 48px); overflow-y: auto; padding-bottom: 24px;
+    position: sticky; top: 84px; width: 216px; flex-shrink: 0;
+    max-height: calc(100vh - 108px); overflow-y: auto; padding-bottom: 24px;
   }
-  aside .group { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--terra); margin: 22px 0 8px; }
-  aside a { display: block; padding: 5px 10px; font-size: 13.5px; color: var(--ink-soft); text-decoration: none; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
-  aside a:hover { color: var(--ink); background: var(--cream-2); }
-  aside a.active { color: var(--terra-dark); border-left-color: var(--terra); font-weight: 600; }
+  aside .group {
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ember); margin: 24px 0 8px;
+  }
+  aside .group:first-child { margin-top: 6px; }
+  aside a {
+    display: block; padding: 5px 10px; font-size: 13.5px; color: var(--text-dim);
+    text-decoration: none; border-radius: 7px;
+  }
+  aside a:hover { color: var(--text); background: var(--ink-1); }
+  aside a.active { color: var(--ember-hot); background: oklch(74% 0.155 45 / 0.09); font-weight: 500; }
 
-  main { flex: 1; min-width: 0; max-width: 780px; }
-  main h1 { font-size: 40px; margin: 12px 0 10px; }
-  main .lede { font-size: 17px; color: var(--ink-soft); margin-bottom: 44px; max-width: 640px; }
+  main { flex: 1; min-width: 0; max-width: 760px; padding-bottom: 110px; }
+  main h1 { font-size: clamp(2.1rem, 4vw, 2.9rem); font-weight: 800; letter-spacing: -0.03em; margin: 16px 0 10px; }
+  main .lede { font-size: 16.5px; color: var(--text-dim); margin-bottom: 34px; max-width: 60ch; text-wrap: pretty; }
   main h2 {
-    font-size: 27px; margin: 60px 0 14px; padding-top: 18px;
-    border-top: 1px solid var(--cream-2);
+    font-size: 25px; font-weight: 800; letter-spacing: -0.02em;
+    margin: 62px 0 14px; padding-top: 20px; border-top: 1px solid var(--line);
   }
-  main h3 { font-size: 18px; margin: 30px 0 10px; }
-  main p, main li { font-size: 15px; color: #4d3d32; }
-  main p { margin: 0 0 14px; }
+  main h3 { font-size: 17px; font-weight: 600; margin: 30px 0 10px; }
+  main p, main li { font-size: 15px; color: var(--text-dim); }
+  main p { margin: 0 0 14px; max-width: 68ch; text-wrap: pretty; }
   main ul, main ol { margin: 0 0 14px; padding-left: 22px; }
   main li { margin-bottom: 6px; }
+  main li b, main p b { color: var(--text); font-weight: 600; }
+  main a { color: var(--ember); text-decoration: none; }
+  main a:hover { text-decoration: underline; }
+  main em { color: var(--text); }
 
   code {
-    background: var(--cream-2); padding: 2px 7px; border-radius: 5px;
-    font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; color: var(--terra-dark);
+    font-family: var(--font-mono); font-size: 0.8em;
+    background: var(--ink-1); border: 1px solid var(--line);
+    padding: 2px 6px; border-radius: 5px; color: var(--text);
   }
   pre {
-    background: var(--code-bg); color: var(--code-fg);
-    border-radius: 12px; padding: 18px 20px; overflow-x: auto;
-    font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; line-height: 1.7;
-    margin: 0 0 18px;
+    background: var(--ink-1); border: 1px solid var(--line);
+    border-radius: 12px; padding: 17px 19px; overflow-x: auto;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9;
+    margin: 0 0 18px; color: var(--text);
   }
-  pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
-  pre .c { color: var(--code-dim); }
-  pre .g { color: var(--code-hl); }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+  pre .c { color: var(--text-dim); }
+  pre .g { color: var(--ember); }
 
   table { border-collapse: collapse; width: 100%; margin: 0 0 18px; font-size: 14px; }
-  th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-soft); padding: 8px 12px; border-bottom: 2px solid var(--cream-2); }
-  td { padding: 9px 12px; border-bottom: 1px solid var(--cream-2); vertical-align: top; color: #4d3d32; }
-  td:first-child { white-space: nowrap; }
+  th {
+    text-align: left; font-family: var(--font-mono); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--ember);
+    padding: 8px 12px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--ink-2); vertical-align: top; color: var(--text-dim); }
+  td:first-child { white-space: nowrap; color: var(--text); }
+  td code { white-space: nowrap; }
 
   .callout {
-    background: var(--white); border-left: 4px solid var(--terra);
-    border-radius: 0 12px 12px 0; padding: 14px 18px; margin: 0 0 18px;
-    box-shadow: 0 2px 10px rgba(160,90,40,.07); font-size: 14.5px;
+    background: var(--ink-1); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 18px 14px 44px; margin: 0 0 18px;
+    font-size: 14.5px; color: var(--text-dim); position: relative;
   }
-  .callout b:first-child { color: var(--terra-dark); }
+  .callout::before { content: "✳"; position: absolute; left: 17px; top: 13px; color: var(--ember); }
+  .callout b:first-child { color: var(--ember-hot); }
 
   /* architecture diagram */
-  .arch { display: flex; align-items: stretch; gap: 0; margin: 6px 0 22px; flex-wrap: wrap; }
+  .arch { display: flex; align-items: stretch; margin: 6px 0 22px; flex-wrap: wrap; gap: 0; }
   .arch .node {
-    background: var(--white); border-radius: 14px; padding: 16px 18px;
-    box-shadow: 0 4px 14px rgba(160,90,40,.1); flex: 1; min-width: 150px;
+    background: var(--ink-1); border: 1px solid var(--line); border-radius: 12px;
+    padding: 15px 17px; flex: 1; min-width: 150px;
   }
-  .arch .node b { display: block; font-size: 14px; margin-bottom: 4px; }
-  .arch .node span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.45; display: block; }
+  .arch .node b { display: block; font-size: 14px; margin-bottom: 4px; color: var(--text); }
+  .arch .node span { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; display: block; }
   .arch .link {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 0 10px; color: var(--terra); font-weight: 700; font-size: 15px; text-align: center;
+    padding: 0 10px; color: var(--ember); font-weight: 700; font-size: 15px; text-align: center;
   }
-  .arch .link small { color: var(--ink-soft); font-weight: 500; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; }
-  .arch .node.hub { border: 2px solid var(--terra); }
+  .arch .link small { font-family: var(--font-mono); color: var(--text-dim); font-weight: 400; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+  .arch .node.hub { border-color: var(--ember); box-shadow: 0 0 24px oklch(74% 0.155 45 / 0.12); }
 
-  .pill-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 18px; }
-  .pill { background: var(--white); border: 1px solid var(--cream-2); border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--ink-soft); }
-  .pill b { color: var(--ink); }
+  .pill-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+  .pill {
+    font-family: var(--font-mono); font-size: 11px;
+    background: var(--ink-1); border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 13px; color: var(--text-dim);
+  }
+  .pill b { color: var(--ember-hot); font-weight: 600; }
 
+  footer {
+    border-top: 1px solid var(--line);
+    padding-block: 34px 44px; font-size: 13.5px; color: var(--text-dim);
+  }
+  footer .bar { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; justify-content: space-between; }
+  footer .mark { color: var(--ember); }
+  footer nav { display: flex; gap: 22px; }
+  footer a { color: var(--text-dim); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 470px) {
+    .brand { font-size: 15px; }
+    .topnav .links a:not(.nav-cta):nth-child(3) { display: none; }
+  }
   @media (max-width: 900px) {
-    .wrap { flex-direction: column; padding: 12px 24px 80px; }
+    .layout { flex-direction: column; }
     aside { position: static; width: 100%; max-height: none; display: flex; flex-wrap: wrap; gap: 2px 10px; }
     aside .group { width: 100%; margin: 12px 0 4px; }
-    .topnav { padding: 16px 24px; }
-    main h1 { font-size: 32px; }
   }
 </style>
 </head>
 <body>
 
-<nav class="topnav">
-  <a class="logo" href="./index.html"><span class="mark">✳</span> agent-sidecar</a>
-  <div class="links">
-    <a href="./index.html">Home</a>
-    <a href="./docs.html" class="here">Docs</a>
-    <a href="https://www.npmjs.com/package/agent-sidecar">npm</a>
+<header class="topnav">
+  <div class="wrap bar">
+    <a class="brand" href="./index.html"><span class="mark">✳</span> agent-sidecar</a>
+    <nav class="links" aria-label="Site">
+      <a href="./docs.html" aria-current="page">Docs</a>
+      <a href="https://github.com/smarchetti/agent-sidecar">GitHub</a>
+      <a href="https://www.npmjs.com/package/agent-sidecar">npm</a>
+      <a class="nav-cta" href="#install">Install</a>
+    </nav>
   </div>
-  <a class="gh" href="https://github.com/smarchetti/agent-sidecar">GitHub ↗</a>
-</nav>
+</header>
 
-<div class="wrap">
+<div class="wrap layout">
   <aside id="toc">
     <div class="group">Start</div>
     <a href="#install">Installation</a>
@@ -160,25 +213,25 @@
   </aside>
 
   <main>
-    <h1 class="display">Documentation</h1>
+    <h1>Documentation</h1>
     <p class="lede">Everything about agent-sidecar: how the canvas works, the MCP tools your agent calls, the HTTP API underneath, and how to write artifacts that talk back.</p>
 
     <div class="pill-row">
       <span class="pill">version <b>0.7.0</b></span>
       <span class="pill">requires <b>Bun ≥ 1.2</b></span>
       <span class="pill">license <b>MIT</b></span>
-      <span class="pill">runs <b>localhost-only</b></span>
+      <span class="pill"><b>localhost</b> only</span>
     </div>
 
-    <h2 id="install" class="display">Installation</h2>
+    <h2 id="install">Installation</h2>
     <p>agent-sidecar is a Claude Code plugin (and a standard MCP server usable from <a href="#other-agents">other agents</a>). The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is <a href="https://bun.sh">Bun</a> on your PATH.</p>
     <pre><code><span class="c"># in any Claude Code session</span>
 <span class="g">›</span> /plugin marketplace add smarchetti/agent-sidecar
 <span class="g">›</span> /plugin install agent-sidecar@agent-sidecar</code></pre>
-    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.6.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. Sidecar is then available in <em>every</em> project.</p>
+    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.7.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
     <p>Verify with <code>/mcp</code>: you should see <b>agent-sidecar</b> listed as connected.</p>
 
-    <h2 id="other-agents" class="display">Other agents</h2>
+    <h2 id="other-agents">Other agents</h2>
     <p>agent-sidecar is a standard MCP stdio server — the plugin is just Claude Code packaging. Any MCP client can run it with this one entry (Bun on PATH is still the only prerequisite):</p>
     <pre><code>{ "mcpServers": { "agent-sidecar": { "command": "bunx", "args": ["agent-sidecar"] } } }</code></pre>
     <table>
@@ -196,22 +249,22 @@
     </ul>
     <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.7.0"]</code>.</div>
 
-    <h2 id="first-artifact" class="display">Your first artifact</h2>
-    <p>You don't call agent-sidecar directly — Claude does. Ask for something visual:</p>
+    <h2 id="first-artifact">Your first artifact</h2>
+    <p>You don't call agent-sidecar directly — your agent does. Ask for something visual:</p>
     <pre><code><span class="g">›</span> show me three layout options for the settings screen on the canvas</code></pre>
-    <p>Claude creates an artifact (a complete HTML document), your browser opens the canvas, and the artifact renders live. When the artifact contains buttons wired to <code>claude.send(...)</code>, clicking one delivers the payload back into the conversation, and Claude continues with your choice.</p>
-    <p>That's the whole product: <b>Claude shows, you click, Claude continues.</b></p>
+    <p>The agent creates an artifact (a complete HTML document), your browser opens the canvas, and the artifact renders live. When the artifact contains buttons wired to <code>claude.send(...)</code>, clicking one delivers the payload back into the conversation, and the agent continues with your choice.</p>
+    <p>That's the whole product: <b>the agent shows, you click, the agent continues.</b></p>
 
-    <h2 id="architecture" class="display">Architecture</h2>
-    <p>agent-sidecar is one process with two faces: an MCP server on stdio (facing Claude Code) and an HTTP server on localhost (facing your browser).</p>
+    <h2 id="architecture">Architecture</h2>
+    <p>agent-sidecar is one process with two faces: an MCP server on stdio (facing your agent) and an HTTP server on localhost (facing your browser).</p>
     <div class="arch">
       <div class="node">
-        <b>Claude Code</b>
+        <b>Your agent</b>
         <span>spawns the server, calls MCP tools</span>
       </div>
       <div class="link">⇄<small>MCP / stdio</small></div>
       <div class="node hub">
-        <b>agent-sidecar process</b>
+        <b>agent-sidecar</b>
         <span>artifact store · interaction queue · session token</span>
       </div>
       <div class="link">⇄<small>HTTP 127.0.0.1</small></div>
@@ -220,21 +273,21 @@
         <span>renders artifacts (SSE live), forwards clicks</span>
       </div>
     </div>
-    <p>The interesting part is the return path. A click in the browser POSTs to the webhook and lands in an in-memory queue. Claude consumes the queue in one of two ways (<a href="#receiving">below</a>) — in both cases the payload arrives as ordinary tool/command output, which is why agent-sidecar works without any push mechanism (like Claude Code channels) being available.</p>
+    <p>The interesting part is the return path. A click in the browser POSTs to the webhook and lands in an in-memory queue. The agent consumes the queue in one of two ways (<a href="#receiving">below</a>) — in both cases the payload arrives as ordinary tool/command output, which is why agent-sidecar works without any push mechanism (like Claude Code channels) being available.</p>
     <p>Artifacts render inside a <b>sandboxed iframe</b> with an opaque origin. Artifact code can't reach the canvas shell, the session token, or the server; its only output channel is <code>claude.send()</code>, which crosses a postMessage bridge that the canvas shell validates and forwards with the token.</p>
 
-    <h2 id="receiving" class="display">Receiving input: two patterns</h2>
+    <h2 id="receiving">Receiving input: two patterns</h2>
     <h3>1. Blocking tool — quick decisions</h3>
-    <p>Claude calls <code>await_interaction</code> right after showing choices. The tool call parks until you click (or times out after up to 120s, in which case Claude simply calls it again). Best when a response is expected within seconds — the answer lands in the same turn.</p>
+    <p>The agent calls <code>await_interaction</code> right after showing choices. The tool call parks until you click (or times out after up to 120s, in which case the agent simply calls it again). Best when a response is expected within seconds — the answer lands in the same turn.</p>
     <h3>2. Background watcher — long waits</h3>
-    <p>Claude starts a background shell task against the long-poll endpoint and keeps working. When you eventually click, the watcher exits and Claude Code re-invokes Claude with the payload:</p>
+    <p>The agent starts a background shell task against the long-poll endpoint and keeps working. When you eventually click, the watcher exits and the agent is re-invoked with the payload:</p>
     <pre><code>curl -s "http://127.0.0.1:&lt;port&gt;/api/wait?token=&lt;token&gt;&amp;artifact_id=&lt;id&gt;"</code></pre>
-    <p>agent-sidecar's server instructions teach Claude both patterns each session — with the real port and token baked in — plus the rule of thumb: block for quick picks, watch in the background when the user may take minutes.</p>
+    <p>agent-sidecar's server instructions teach the agent both patterns each session — with the real port and token baked in — plus the rule of thumb: block for quick picks, watch in the background when the user may take minutes.</p>
     <div class="callout"><b>Why artifact_id matters:</b> both consumers accept an artifact filter. Passing it means a stale click on some older artifact can't be mistaken for the answer to the current question — non-matching interactions stay queued.</div>
 
-    <h2 id="sessions" class="display">Sessions &amp; files</h2>
-    <p>Each Claude Code session runs its own sidecar. The server prefers port <code>8765</code> (override with the <code>SIDECAR_PORT</code> env var); if another session already holds it, it falls back to an ephemeral port instead of crashing.</p>
-    <p>Per-project state lives in <code>.sidecar/</code> under the directory Claude Code runs in (add it to <code>.gitignore</code>):</p>
+    <h2 id="sessions">Sessions &amp; files</h2>
+    <p>Each agent session runs its own agent-sidecar. The server prefers port <code>8765</code> (override with the <code>SIDECAR_PORT</code> env var); if another session already holds it, it falls back to an ephemeral port instead of crashing.</p>
+    <p>Per-project state lives in <code>.sidecar/</code> under the directory your agent runs in (add it to <code>.gitignore</code>):</p>
     <table>
       <tr><th>File</th><th>Contents</th></tr>
       <tr><td><code>session.json</code></td><td>This session's coordinates: <code>{ pid, port, url, token, startedAt }</code>. How external callers discover the port and auth token. Removed on clean exit.</td></tr>
@@ -242,7 +295,7 @@
       <tr><td><code>interactions.jsonl</code></td><td>Append-only log of every interaction (one JSON object per line, with <code>seq</code>, <code>receivedAt</code>, <code>kind</code>, <code>artifactId</code>, <code>payload</code>). Rotates to <code>.old</code> at 5&nbsp;MB. <code>tail -f</code> it to watch the loop live.</td></tr>
     </table>
 
-    <h2 id="tools" class="display">MCP tools</h2>
+    <h2 id="tools">MCP tools</h2>
     <p>Six tools, prefixed <code>mcp__plugin_agent-sidecar_agent-sidecar__</code> when installed as a plugin.</p>
 
     <h3>create_artifact</h3>
@@ -276,38 +329,38 @@
     <p>On timeout it returns <code>status=no_response</code> — the caller just calls again to keep waiting.</p>
 
     <h3>get_interactions</h3>
-    <p>No parameters. Drains all queued interactions without blocking — useful for catching clicks that happened while Claude was doing other work.</p>
+    <p>No parameters. Drains all queued interactions without blocking — useful for catching clicks that happened while the agent was doing other work.</p>
 
     <h3>list_artifacts / remove_artifact</h3>
     <p><code>list_artifacts</code> lists id, title, and timestamps for everything on the canvas. <code>remove_artifact</code> takes an <code>id</code> and removes it; connected tabs move to the newest remaining artifact.</p>
 
-    <h2 id="http" class="display">HTTP API</h2>
+    <h2 id="http">HTTP API</h2>
     <p>Bound to <code>127.0.0.1</code> only. The two <code>/api/*</code> endpoints require the session token — via the <code>X-Sidecar-Token</code> header, a <code>?token=</code> query param, or <code>Authorization: Bearer</code>.</p>
     <table>
       <tr><th>Endpoint</th><th>Auth</th><th>Description</th></tr>
       <tr><td><code>GET /</code></td><td>—</td><td>The canvas UI</td></tr>
       <tr><td><code>GET /events</code></td><td>—</td><td>SSE stream: a <code>snapshot</code> event on connect, then <code>created</code> / <code>updated</code> / <code>removed</code></td></tr>
       <tr><td><code>GET /artifact/:id</code></td><td>—</td><td>Artifact HTML with the <code>claude.send()</code> helper injected</td></tr>
-      <tr><td><code>POST /api/webhook</code></td><td>token</td><td>Queue a payload for Claude. JSON body <code>{ artifactId, payload }</code> is recorded as an artifact interaction; anything else is recorded as an external webhook event, body forwarded as-is</td></tr>
+      <tr><td><code>POST /api/webhook</code></td><td>token</td><td>Queue a payload for the agent. JSON body <code>{ artifactId, payload }</code> is recorded as an artifact interaction; anything else is recorded as an external webhook event, body forwarded as-is</td></tr>
       <tr><td><code>GET /api/wait</code></td><td>token</td><td>Long-poll: returns the next interaction as JSON. <code>?artifact_id=</code> filters; <code>?timeout=SECS</code> caps the wait (then <code>408</code>); no timeout means wait indefinitely</td></tr>
       <tr><td><code>GET /health</code></td><td>—</td><td><code>{ ok, artifacts, canvasTabs, queuedInteractions }</code></td></tr>
     </table>
 
-    <h2 id="send" class="display">claude.send()</h2>
+    <h2 id="send">claude.send()</h2>
     <p>Every artifact gets a <code>claude</code> global injected before its own scripts run. One method:</p>
     <pre><code>claude.send(payload)  <span class="c">// → Promise&lt;boolean&gt;</span></code></pre>
     <ul>
-      <li><code>payload</code> is any JSON-serializable value; it arrives in Claude's context verbatim.</li>
-      <li>Resolves <code>true</code> once the canvas shell confirms delivery; the shell also shows a "✓ Sent to Claude" toast.</li>
+      <li><code>payload</code> is any JSON-serializable value; it arrives in the agent's context verbatim.</li>
+      <li>Resolves <code>true</code> once the canvas shell confirms delivery; the shell also shows a "✓ Sent" toast.</li>
       <li>Resolves <code>false</code> if delivery fails or times out (5s), or if the identical payload was sent within the last 1.5s — the built-in double-click debounce.</li>
     </ul>
     <p>Under the hood the sandboxed artifact posts a message to the canvas shell, which attaches the session token and forwards to <code>/api/webhook</code>. Artifact code never handles the token.</p>
 
-    <h2 id="artifacts" class="display">Writing artifacts</h2>
+    <h2 id="artifacts">Writing artifacts</h2>
     <p>Artifacts are complete HTML documents rendered in a sandboxed iframe (<code>allow-scripts allow-forms allow-popups</code>, opaque origin). Practical rules:</p>
     <ul>
       <li><b>Inline everything.</b> The opaque origin means same-origin API calls are blocked and cross-origin requests fail CORS. No CDNs, no external fonts — inline CSS and JS only.</li>
-      <li><b>No storage.</b> <code>localStorage</code>/<code>cookies</code> are unavailable. Keep state in JS variables; if it must survive, send it to Claude.</li>
+      <li><b>No storage.</b> <code>localStorage</code>/<code>cookies</code> are unavailable. Keep state in JS variables; if it must survive, send it to the agent.</li>
       <li><b><code>claude.send()</code> is the only output.</b> Design every artifact around the payload you want back.</li>
     </ul>
     <h3>Pattern: choice cards</h3>
@@ -317,31 +370,31 @@
     <pre><code>&lt;form onsubmit="event.preventDefault();
   claude.send(Object.fromEntries(new FormData(event.target)))"&gt;
   &lt;input name="title" /&gt; &lt;textarea name="notes"&gt;&lt;/textarea&gt;
-  &lt;button&gt;Send to Claude&lt;/button&gt;
+  &lt;button&gt;Send&lt;/button&gt;
 &lt;/form&gt;</code></pre>
     <h3>Pattern: approve / iterate bar</h3>
     <pre><code>claude.send({ verdict: 'approve' })
 claude.send({ verdict: 'iterate', notes: field.value })</code></pre>
     <p>Give the user visual confirmation on top of the toast — flip the clicked button's label, highlight the selected card — and structure payloads as small objects (<code>{ choice, notes }</code>) rather than bare strings, so the receiving side stays unambiguous.</p>
 
-    <h2 id="external" class="display">External webhooks</h2>
+    <h2 id="external">External webhooks</h2>
     <p>Anything that can POST can push events into the session — CI, scripts, other tools. Read the session coordinates from <code>.sidecar/session.json</code>:</p>
     <pre><code>url=$(jq -r .url .sidecar/session.json)
 token=$(jq -r .token .sidecar/session.json)
 curl -X POST -H "X-Sidecar-Token: $token" \
   -d "build failed on main: https://ci.example.com/run/1234" \
   "$url/api/webhook"</code></pre>
-    <p>Non-artifact payloads are tagged <code>kind: "webhook"</code> and reach Claude through the same queue — a waiting <code>await_interaction</code> (without an artifact filter) or <code>/api/wait</code> picks them up.</p>
+    <p>Non-artifact payloads are tagged <code>kind: "webhook"</code> and reach the agent through the same queue — a waiting <code>await_interaction</code> (without an artifact filter) or <code>/api/wait</code> picks them up.</p>
 
-    <h2 id="security" class="display">Security model</h2>
+    <h2 id="security">Security model</h2>
     <ul>
-      <li><b>Localhost only.</b> The HTTP server binds <code>127.0.0.1</code>; nothing off the machine can reach it. Don't port-forward or tunnel it — anything that reaches the webhook is eventually placed in front of Claude.</li>
+      <li><b>Localhost only.</b> The HTTP server binds <code>127.0.0.1</code>; nothing off the machine can reach it. Don't port-forward or tunnel it — anything that reaches the webhook is eventually placed in front of the agent.</li>
       <li><b>Per-session token.</b> Without auth, any webpage you visit could fire cross-site POSTs at localhost and inject text into your session. Both <code>/api/*</code> endpoints require a random 128-bit token generated at startup. Web pages can't read it (it lives in <code>session.json</code> and the canvas shell); local processes can, and are trusted anyway.</li>
-      <li><b>Sandboxed artifacts.</b> Artifact HTML is authored by Claude, which makes it semi-trusted — a prompt-injected artifact shouldn't get free rein. The opaque-origin sandbox denies it the token, the canvas DOM, storage, and same-origin network; the canvas shell only accepts messages from the artifact iframe it created.</li>
-      <li><b>Interactions are user input.</b> agent-sidecar instructs Claude to treat payloads as coming from you. Keep that in mind if you point external systems at the webhook: whatever they post is read by Claude with that framing.</li>
+      <li><b>Sandboxed artifacts.</b> Artifact HTML is authored by the agent, which makes it semi-trusted — a prompt-injected artifact shouldn't get free rein. The opaque-origin sandbox denies it the token, the canvas DOM, storage, and same-origin network; the canvas shell only accepts messages from the artifact iframe it created.</li>
+      <li><b>Interactions are user input.</b> agent-sidecar instructs the agent to treat payloads as coming from you. Keep that in mind if you point external systems at the webhook: whatever they post is read by the agent with that framing.</li>
     </ul>
 
-    <h2 id="development" class="display">Development</h2>
+    <h2 id="development">Development</h2>
     <pre><code>git clone https://github.com/smarchetti/agent-sidecar
 cd agent-sidecar
 bun install
@@ -351,19 +404,29 @@ bun test          <span class="c"># 24 end-to-end tests over real MCP stdio</spa
     <div class="callout"><b>Two sidecars warning:</b> if the plugin is installed globally, a dev session loads both the plugin server and your working copy. Ports won't collide (ephemeral fallback), but you'll have duplicate tool sets — disable the plugin while developing.</div>
     <p><b>Releasing:</b> bump <code>version</code> in <code>package.json</code> and the <code>agent-sidecar@&lt;version&gt;</code> pin in <code>.claude-plugin/plugin.json</code>, then <code>npm publish</code> (the <code>prepublishOnly</code> hook rebuilds <code>dist/sidecar.js</code>). Publish <em>before</em> pushing the manifest, so it never points at a version that doesn't exist.</p>
 
-    <h2 id="troubleshooting" class="display">Troubleshooting</h2>
+    <h2 id="troubleshooting">Troubleshooting</h2>
     <table>
       <tr><th>Symptom</th><th>Check</th></tr>
       <tr><td>Plugin doesn't load</td><td><code>/mcp</code> shows agent-sidecar? Is <code>bun</code> on PATH? First launch fetches from npm — needs network once.</td></tr>
       <tr><td>Canvas didn't open</td><td>The URL is in every <code>create_artifact</code> result and in <code>.sidecar/session.json</code>. Auto-open only fires when no tab is connected.</td></tr>
-      <tr><td>Clicks not arriving</td><td><code>tail -f .sidecar/interactions.jsonl</code> — if clicks appear there, Claude just hasn't consumed them yet (<code>get_interactions</code> drains). If not, check <code>GET /health</code> and the browser console.</td></tr>
+      <tr><td>Clicks not arriving</td><td><code>tail -f .sidecar/interactions.jsonl</code> — if clicks appear there, the agent just hasn't consumed them yet (<code>get_interactions</code> drains). If not, check <code>GET /health</code> and the browser console.</td></tr>
       <tr><td>Wrong port</td><td>Another session holds 8765; this one fell back to an ephemeral port. <code>session.json</code> always has the live URL.</td></tr>
       <tr><td>403 from the API</td><td>Missing/stale token — re-read <code>session.json</code>; the token rotates every session.</td></tr>
       <tr><td>Old version running</td><td>Plugin pins <code>agent-sidecar@&lt;version&gt;</code>. Update the plugin, restart Claude Code.</td></tr>
     </table>
-
   </main>
 </div>
+
+<footer>
+  <div class="wrap bar">
+    <span><span class="mark">✳</span> agent-sidecar — built with Claude Code, for coding agents · MIT</span>
+    <nav aria-label="Footer">
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/smarchetti/agent-sidecar">GitHub</a>
+      <a href="https://www.npmjs.com/package/agent-sidecar">npm</a>
+    </nav>
+  </div>
+</footer>
 
 <script>
   // scrollspy: highlight the sidebar link for the section in view
@@ -371,7 +434,7 @@ bun test          <span class="c"># 24 end-to-end tests over real MCP stdio</spa
   const targets = links.map(a => document.getElementById(a.hash.slice(1))).filter(Boolean)
   function spy() {
     let current = targets[0]
-    for (const t of targets) if (t.getBoundingClientRect().top < 120) current = t
+    for (const t of targets) if (t.getBoundingClientRect().top < 140) current = t
     links.forEach(a => a.classList.toggle('active', a.hash === '#' + current.id))
   }
   addEventListener('scroll', spy, { passive: true })

@@ -4,6 +4,10 @@ node_modules
 # sidecar interaction log
 .sidecar/
 
+# local tooling state (browser screenshots, impeccable live-mode config)
+.playwright-mcp/
+.impeccable/
+
 # output (dist/ is built on npm publish via prepublishOnly, not committed)
 out
 dist
