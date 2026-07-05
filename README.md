@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/agent-sidecar?color=d97757)](https://www.npmjs.com/package/agent-sidecar)
 [![docs](https://img.shields.io/badge/docs-smarchetti.github.io-d97757)](https://smarchetti.github.io/agent-sidecar/docs.html)
 
-**A visual canvas for Claude Code.** Claude shows you interactive HTML — design options, forms, previews, dashboards — in your browser, and your clicks flow straight back into the conversation.
+**A visual canvas for coding agents.** Your agent shows you interactive HTML — design options, forms, previews, dashboards — in your browser, and your clicks flow straight back into the conversation. Works with Claude Code, Cursor, Codex, or any MCP client.
 
 > *"Show me three layout options for the settings screen"* → three clickable mockups appear on the canvas → you click one → Claude continues with your choice.
 

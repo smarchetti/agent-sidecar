@@ -1,7 +1,7 @@
 {
   "name": "agent-sidecar",
   "version": "0.7.0",
-  "description": "A visual canvas for Claude Code: Claude shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation.",
+  "description": "A visual canvas for coding agents: your agent shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation.",
   "author": {
     "name": "Sean Marchetti"
   },

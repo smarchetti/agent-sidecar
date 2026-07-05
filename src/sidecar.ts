@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * agent-sidecar — an MCP server that gives Claude Code a visual canvas.
+ * agent-sidecar — an MCP server that gives coding agents a visual canvas.
  *
  * Two halves, one process:
  *  1. MCP server (stdio, spawned by Claude Code) exposing artifact tools plus
