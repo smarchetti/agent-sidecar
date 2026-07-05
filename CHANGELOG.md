@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 — 2026-07-05
+
+- Rebrand: the plugin, MCP server, and canvas are all named **agent-sidecar** now (install is `/plugin install agent-sidecar@agent-sidecar`; tool prefix becomes `mcp__plugin_agent-sidecar_agent-sidecar__`). Existing installs of the old `sidecar` plugin should uninstall and reinstall. Technical identifiers (`.sidecar/` directory, `SIDECAR_PORT`, `X-Sidecar-Token`) are unchanged.
+- Docs: install instructions for other MCP clients (Cursor, VS Code, Codex CLI, Gemini CLI, Windsurf) on the site and in the README.
+
 ## 0.6.0 — 2026-07-04
 
 - Distribution moved to npm: the plugin manifest now launches `bunx agent-sidecar@<version>` instead of running a bundle committed in the repo. `dist/` is no longer tracked in git (built by `prepublishOnly` at publish time), and the CI drift check is gone.

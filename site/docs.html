@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Docs — sidecar</title>
+<title>Docs — agent-sidecar</title>
 <meta name="description" content="Documentation for agent-sidecar: installation, MCP tools, HTTP API, writing artifacts, security model, and development guide." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23d97757'%3E✳%3C/text%3E%3C/svg%3E" />
 <style>
@@ -127,7 +127,7 @@
 <body>
 
 <nav class="topnav">
-  <a class="logo" href="./index.html"><span class="mark">✳</span> sidecar</a>
+  <a class="logo" href="./index.html"><span class="mark">✳</span> agent-sidecar</a>
   <div class="links">
     <a href="./index.html">Home</a>
     <a href="./docs.html" class="here">Docs</a>
@@ -140,6 +140,7 @@
   <aside id="toc">
     <div class="group">Start</div>
     <a href="#install">Installation</a>
+    <a href="#other-agents">Other agents</a>
     <a href="#first-artifact">Your first artifact</a>
     <div class="group">Concepts</div>
     <a href="#architecture">Architecture</a>
@@ -160,31 +161,49 @@
 
   <main>
     <h1 class="display">Documentation</h1>
-    <p class="lede">Everything about sidecar: how the canvas works, the MCP tools Claude calls, the HTTP API underneath, and how to write artifacts that talk back.</p>
+    <p class="lede">Everything about agent-sidecar: how the canvas works, the MCP tools Claude calls, the HTTP API underneath, and how to write artifacts that talk back.</p>
 
     <div class="pill-row">
-      <span class="pill">version <b>0.6.0</b></span>
+      <span class="pill">version <b>0.7.0</b></span>
       <span class="pill">requires <b>Bun ≥ 1.2</b></span>
       <span class="pill">license <b>MIT</b></span>
       <span class="pill">runs <b>localhost-only</b></span>
     </div>
 
     <h2 id="install" class="display">Installation</h2>
-    <p>Sidecar is a Claude Code plugin. The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is <a href="https://bun.sh">Bun</a> on your PATH.</p>
+    <p>agent-sidecar is a Claude Code plugin (and a standard MCP server usable from <a href="#other-agents">other agents</a>). The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is <a href="https://bun.sh">Bun</a> on your PATH.</p>
     <pre><code><span class="c"># in any Claude Code session</span>
 <span class="g">›</span> /plugin marketplace add smarchetti/agent-sidecar
-<span class="g">›</span> /plugin install sidecar@agent-sidecar</code></pre>
+<span class="g">›</span> /plugin install agent-sidecar@agent-sidecar</code></pre>
     <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.6.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. Sidecar is then available in <em>every</em> project.</p>
-    <p>Verify with <code>/mcp</code>: you should see <b>sidecar</b> listed as connected.</p>
+    <p>Verify with <code>/mcp</code>: you should see <b>agent-sidecar</b> listed as connected.</p>
+
+    <h2 id="other-agents" class="display">Other agents</h2>
+    <p>agent-sidecar is a standard MCP stdio server — the plugin is just Claude Code packaging. Any MCP client can run it with this one entry (Bun on PATH is still the only prerequisite):</p>
+    <pre><code>{ "mcpServers": { "agent-sidecar": { "command": "bunx", "args": ["agent-sidecar"] } } }</code></pre>
+    <table>
+      <tr><th>Agent</th><th>Where to put it</th></tr>
+      <tr><td>Cursor</td><td><code>.cursor/mcp.json</code> in the project, or <code>~/.cursor/mcp.json</code> globally</td></tr>
+      <tr><td>VS Code (Copilot)</td><td><code>.vscode/mcp.json</code> — same entry, but under a <code>"servers"</code> key instead of <code>"mcpServers"</code></td></tr>
+      <tr><td>Codex CLI</td><td><code>~/.codex/config.toml</code>:<br/><code>[mcp_servers.agent-sidecar]</code> · <code>command = "bunx"</code> · <code>args = ["agent-sidecar"]</code></td></tr>
+      <tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code> under <code>"mcpServers"</code></td></tr>
+      <tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code> under <code>"mcpServers"</code></td></tr>
+    </table>
+    <p>Everything transfers: the tools, the canvas, token auth, the <code>.sidecar/</code> session files. Two Claude-flavored details to be aware of:</p>
+    <ul>
+      <li>The helper injected into artifacts is named <code>claude.send()</code> regardless of which agent is driving.</li>
+      <li>The <a href="#receiving">background-watcher pattern</a> needs an agent that can run shell commands in the background and surface their output. The blocking <code>await_interaction</code> tool works in every client.</li>
+    </ul>
+    <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.7.0"]</code>.</div>
 
     <h2 id="first-artifact" class="display">Your first artifact</h2>
-    <p>You don't call sidecar directly — Claude does. Ask for something visual:</p>
+    <p>You don't call agent-sidecar directly — Claude does. Ask for something visual:</p>
     <pre><code><span class="g">›</span> show me three layout options for the settings screen on the canvas</code></pre>
     <p>Claude creates an artifact (a complete HTML document), your browser opens the canvas, and the artifact renders live. When the artifact contains buttons wired to <code>claude.send(...)</code>, clicking one delivers the payload back into the conversation, and Claude continues with your choice.</p>
     <p>That's the whole product: <b>Claude shows, you click, Claude continues.</b></p>
 
     <h2 id="architecture" class="display">Architecture</h2>
-    <p>Sidecar is one process with two faces: an MCP server on stdio (facing Claude Code) and an HTTP server on localhost (facing your browser).</p>
+    <p>agent-sidecar is one process with two faces: an MCP server on stdio (facing Claude Code) and an HTTP server on localhost (facing your browser).</p>
     <div class="arch">
       <div class="node">
         <b>Claude Code</b>
@@ -192,7 +211,7 @@
       </div>
       <div class="link">⇄<small>MCP / stdio</small></div>
       <div class="node hub">
-        <b>sidecar process</b>
+        <b>agent-sidecar process</b>
         <span>artifact store · interaction queue · session token</span>
       </div>
       <div class="link">⇄<small>HTTP 127.0.0.1</small></div>
@@ -201,7 +220,7 @@
         <span>renders artifacts (SSE live), forwards clicks</span>
       </div>
     </div>
-    <p>The interesting part is the return path. A click in the browser POSTs to the webhook and lands in an in-memory queue. Claude consumes the queue in one of two ways (<a href="#receiving">below</a>) — in both cases the payload arrives as ordinary tool/command output, which is why sidecar works without any push mechanism (like Claude Code channels) being available.</p>
+    <p>The interesting part is the return path. A click in the browser POSTs to the webhook and lands in an in-memory queue. Claude consumes the queue in one of two ways (<a href="#receiving">below</a>) — in both cases the payload arrives as ordinary tool/command output, which is why agent-sidecar works without any push mechanism (like Claude Code channels) being available.</p>
     <p>Artifacts render inside a <b>sandboxed iframe</b> with an opaque origin. Artifact code can't reach the canvas shell, the session token, or the server; its only output channel is <code>claude.send()</code>, which crosses a postMessage bridge that the canvas shell validates and forwards with the token.</p>
 
     <h2 id="receiving" class="display">Receiving input: two patterns</h2>
@@ -210,7 +229,7 @@
     <h3>2. Background watcher — long waits</h3>
     <p>Claude starts a background shell task against the long-poll endpoint and keeps working. When you eventually click, the watcher exits and Claude Code re-invokes Claude with the payload:</p>
     <pre><code>curl -s "http://127.0.0.1:&lt;port&gt;/api/wait?token=&lt;token&gt;&amp;artifact_id=&lt;id&gt;"</code></pre>
-    <p>Sidecar's server instructions teach Claude both patterns each session — with the real port and token baked in — plus the rule of thumb: block for quick picks, watch in the background when the user may take minutes.</p>
+    <p>agent-sidecar's server instructions teach Claude both patterns each session — with the real port and token baked in — plus the rule of thumb: block for quick picks, watch in the background when the user may take minutes.</p>
     <div class="callout"><b>Why artifact_id matters:</b> both consumers accept an artifact filter. Passing it means a stale click on some older artifact can't be mistaken for the answer to the current question — non-matching interactions stay queued.</div>
 
     <h2 id="sessions" class="display">Sessions &amp; files</h2>
@@ -224,7 +243,7 @@
     </table>
 
     <h2 id="tools" class="display">MCP tools</h2>
-    <p>Six tools, prefixed <code>mcp__plugin_sidecar_sidecar__</code> when installed as a plugin.</p>
+    <p>Six tools, prefixed <code>mcp__plugin_agent-sidecar_agent-sidecar__</code> when installed as a plugin.</p>
 
     <h3>create_artifact</h3>
     <table>
@@ -319,7 +338,7 @@ curl -X POST -H "X-Sidecar-Token: $token" \
       <li><b>Localhost only.</b> The HTTP server binds <code>127.0.0.1</code>; nothing off the machine can reach it. Don't port-forward or tunnel it — anything that reaches the webhook is eventually placed in front of Claude.</li>
       <li><b>Per-session token.</b> Without auth, any webpage you visit could fire cross-site POSTs at localhost and inject text into your session. Both <code>/api/*</code> endpoints require a random 128-bit token generated at startup. Web pages can't read it (it lives in <code>session.json</code> and the canvas shell); local processes can, and are trusted anyway.</li>
       <li><b>Sandboxed artifacts.</b> Artifact HTML is authored by Claude, which makes it semi-trusted — a prompt-injected artifact shouldn't get free rein. The opaque-origin sandbox denies it the token, the canvas DOM, storage, and same-origin network; the canvas shell only accepts messages from the artifact iframe it created.</li>
-      <li><b>Interactions are user input.</b> Sidecar instructs Claude to treat payloads as coming from you. Keep that in mind if you point external systems at the webhook: whatever they post is read by Claude with that framing.</li>
+      <li><b>Interactions are user input.</b> agent-sidecar instructs Claude to treat payloads as coming from you. Keep that in mind if you point external systems at the webhook: whatever they post is read by Claude with that framing.</li>
     </ul>
 
     <h2 id="development" class="display">Development</h2>
@@ -335,7 +354,7 @@ bun test          <span class="c"># 24 end-to-end tests over real MCP stdio</spa
     <h2 id="troubleshooting" class="display">Troubleshooting</h2>
     <table>
       <tr><th>Symptom</th><th>Check</th></tr>
-      <tr><td>Plugin doesn't load</td><td><code>/mcp</code> shows sidecar? Is <code>bun</code> on PATH? First launch fetches from npm — needs network once.</td></tr>
+      <tr><td>Plugin doesn't load</td><td><code>/mcp</code> shows agent-sidecar? Is <code>bun</code> on PATH? First launch fetches from npm — needs network once.</td></tr>
       <tr><td>Canvas didn't open</td><td>The URL is in every <code>create_artifact</code> result and in <code>.sidecar/session.json</code>. Auto-open only fires when no tab is connected.</td></tr>
       <tr><td>Clicks not arriving</td><td><code>tail -f .sidecar/interactions.jsonl</code> — if clicks appear there, Claude just hasn't consumed them yet (<code>get_interactions</code> drains). If not, check <code>GET /health</code> and the browser console.</td></tr>
       <tr><td>Wrong port</td><td>Another session holds 8765; this one fell back to an ephemeral port. <code>session.json</code> always has the live URL.</td></tr>

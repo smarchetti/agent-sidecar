@@ -1,15 +1,15 @@
 {
-  "name": "sidecar",
-  "version": "0.6.0",
+  "name": "agent-sidecar",
+  "version": "0.7.0",
   "description": "A visual canvas for Claude Code: Claude shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation.",
   "author": {
     "name": "Sean Marchetti"
   },
   "keywords": ["canvas", "artifacts", "visual", "mcp", "webhook"],
   "mcpServers": {
-    "sidecar": {
+    "agent-sidecar": {
       "command": "bunx",
-      "args": ["agent-sidecar@0.6.0"]
+      "args": ["agent-sidecar@0.7.0"]
     }
   }
 }

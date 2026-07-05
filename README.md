@@ -8,7 +8,7 @@
 
 > *"Show me three layout options for the settings screen"* → three clickable mockups appear on the canvas → you click one → Claude continues with your choice.
 
-Sidecar is an MCP server with an embedded web server, packaged as a Claude Code plugin. It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-Claude return path is a long-poll the server turns into ordinary tool output.
+agent-sidecar is an MCP server with an embedded web server, packaged as a Claude Code plugin — and usable from [any MCP client](#use-with-other-agents). It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-agent return path is a long-poll the server turns into ordinary tool output.
 
 **Website & full docs → [smarchetti.github.io/agent-sidecar](https://smarchetti.github.io/agent-sidecar/)** ([documentation](https://smarchetti.github.io/agent-sidecar/docs.html))
 
@@ -18,17 +18,35 @@ Requires [Bun](https://bun.sh) on your PATH. In any Claude Code session:
 
 ```
 /plugin marketplace add smarchetti/agent-sidecar
-/plugin install sidecar@agent-sidecar
+/plugin install agent-sidecar@agent-sidecar
 ```
 
 Restart Claude Code, then ask for something visual: *"show me three layout options for a pricing page on the canvas."* The browser opens, the artifact renders, and clicking it answers Claude.
+
+## Use with other agents
+
+agent-sidecar is a standard MCP stdio server, so any MCP client can run it — the plugin is just Claude Code packaging. Point your agent at:
+
+```json
+{ "mcpServers": { "agent-sidecar": { "command": "bunx", "args": ["agent-sidecar"] } } }
+```
+
+| Agent | Config file |
+| --- | --- |
+| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) |
+| VS Code (Copilot) | `.vscode/mcp.json` — same entry under a `"servers"` key |
+| Codex CLI | `~/.codex/config.toml` — `[mcp_servers.agent-sidecar]` with `command`/`args` |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+
+Everything transfers: the tools, the canvas, the token auth, the `.sidecar/` files. Two Claude-flavored details to know: the injected browser helper is still named `claude.send()`, and the background-watcher pattern requires an agent that can run shell commands in the background — the blocking `await_interaction` tool works everywhere.
 
 ## How it works
 
 One process, two faces:
 
 ```
-Claude Code  ⇄ MCP/stdio ⇄  sidecar  ⇄ HTTP 127.0.0.1 ⇄  browser canvas
+Claude Code  ⇄ MCP/stdio ⇄  agent-sidecar  ⇄ HTTP 127.0.0.1 ⇄  browser canvas
                               │
                               └── POST /api/webhook  ←  CI, scripts, anything
 ```
@@ -45,7 +63,7 @@ Every interaction is also appended to `.sidecar/interactions.jsonl` — a durabl
 
 **HTTP** — `GET /` canvas · `GET /events` SSE · `GET /artifact/:id` · `POST /api/webhook` (token) · `GET /api/wait` long-poll (token) · `GET /health`.
 
-**Sessions** — each Claude Code session runs its own sidecar: port `8765` preferred, ephemeral fallback if taken. Coordinates (port, URL, auth token) live in `.sidecar/session.json`, which is how external systems push events in:
+**Sessions** — each agent session runs its own agent-sidecar: port `8765` preferred, ephemeral fallback if taken. Coordinates (port, URL, auth token) live in `.sidecar/session.json`, which is how external systems push events in:
 
 ```bash
 url=$(jq -r .url .sidecar/session.json); token=$(jq -r .token .sidecar/session.json)

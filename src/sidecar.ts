@@ -381,11 +381,11 @@ function openBrowser(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: 'sidecar', version: '0.6.0' },
+  { name: 'agent-sidecar', version: '0.7.0' },
   {
     capabilities: { tools: {} },
     instructions: [
-      `You have a visual sidecar: a browser canvas at ${BASE_URL} where you can show`,
+      `You have agent-sidecar, a visual canvas at ${BASE_URL} where you can show`,
       'interactive HTML artifacts to the user. Use the sidecar tools whenever a visual or',
       'interactive presentation beats plain text: design options to pick from, forms,',
       'previews, comparisons, diagrams, dashboards.',

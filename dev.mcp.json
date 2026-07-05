@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "sidecar": { "command": "bun", "args": ["./src/sidecar.ts"] }
+    "agent-sidecar": { "command": "bun", "args": ["./src/sidecar.ts"] }
   }
 }

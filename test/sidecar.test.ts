@@ -100,7 +100,7 @@ describe('http surface', () => {
 
   test('canvas page is served with the session token injected', async () => {
     const canvas = await (await fetch(base)).text()
-    expect(canvas).toContain('Claude Sidecar')
+    expect(canvas).toContain('agent-sidecar')
     expect(canvas).toContain(session.token)
     expect(canvas).toContain('sandbox="allow-scripts')
   })
