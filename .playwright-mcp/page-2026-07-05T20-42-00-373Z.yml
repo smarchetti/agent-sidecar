@@ -1,0 +1,485 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - link "✳ sidecar" [ref=e3] [cursor=pointer]:
+      - /url: ./index.html
+      - generic [ref=e4]: ✳
+      - text: sidecar
+    - generic [ref=e5]:
+      - link "Home" [ref=e6] [cursor=pointer]:
+        - /url: ./index.html
+      - link "Docs" [ref=e7] [cursor=pointer]:
+        - /url: ./docs.html
+      - link "npm" [ref=e8] [cursor=pointer]:
+        - /url: https://www.npmjs.com/package/agent-sidecar
+    - link "GitHub ↗" [ref=e9] [cursor=pointer]:
+      - /url: https://github.com/smarchetti/agent-sidecar
+  - generic [ref=e10]:
+    - complementary [ref=e11]:
+      - generic [ref=e12]: Start
+      - link "Installation" [ref=e13] [cursor=pointer]:
+        - /url: "#install"
+      - link "Your first artifact" [ref=e14] [cursor=pointer]:
+        - /url: "#first-artifact"
+      - generic [ref=e15]: Concepts
+      - link "Architecture" [ref=e16] [cursor=pointer]:
+        - /url: "#architecture"
+      - link "Receiving input" [ref=e17] [cursor=pointer]:
+        - /url: "#receiving"
+      - link "Sessions & files" [ref=e18] [cursor=pointer]:
+        - /url: "#sessions"
+      - generic [ref=e19]: Reference
+      - link "MCP tools" [ref=e20] [cursor=pointer]:
+        - /url: "#tools"
+      - link "HTTP API" [ref=e21] [cursor=pointer]:
+        - /url: "#http"
+      - link "claude.send()" [ref=e22] [cursor=pointer]:
+        - /url: "#send"
+      - generic [ref=e23]: Guides
+      - link "Writing artifacts" [ref=e24] [cursor=pointer]:
+        - /url: "#artifacts"
+      - link "External webhooks" [ref=e25] [cursor=pointer]:
+        - /url: "#external"
+      - link "Security model" [ref=e26] [cursor=pointer]:
+        - /url: "#security"
+      - generic [ref=e27]: Project
+      - link "Development" [ref=e28] [cursor=pointer]:
+        - /url: "#development"
+      - link "Troubleshooting" [ref=e29] [cursor=pointer]:
+        - /url: "#troubleshooting"
+    - main [ref=e30]:
+      - heading "Documentation" [level=1] [ref=e31]
+      - paragraph [ref=e32]: "Everything about sidecar: how the canvas works, the MCP tools Claude calls, the HTTP API underneath, and how to write artifacts that talk back."
+      - generic [ref=e33]:
+        - generic [ref=e34]: version 0.6.0
+        - generic [ref=e35]: requires Bun ≥ 1.2
+        - generic [ref=e36]: license MIT
+        - generic [ref=e37]: runs localhost-only
+      - heading "Installation" [level=2] [ref=e38]
+      - paragraph [ref=e39]:
+        - text: Sidecar is a Claude Code plugin. The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is
+        - link "Bun" [ref=e40] [cursor=pointer]:
+          - /url: https://bun.sh
+        - text: on your PATH.
+      - code [ref=e42]: "# in any Claude Code session › /plugin marketplace add smarchetti/agent-sidecar › /plugin install sidecar@agent-sidecar"
+      - paragraph [ref=e43]:
+        - text: Restart Claude Code (or
+        - code [ref=e44]: /reload-plugins
+        - text: ). The plugin launches
+        - code [ref=e45]: bunx agent-sidecar@0.6.0
+        - text: — the first run fetches the package from npm and caches it; after that startup is instant. Sidecar is then available in
+        - emphasis [ref=e46]: every
+        - text: project.
+      - paragraph [ref=e47]:
+        - text: Verify with
+        - code [ref=e48]: /mcp
+        - text: ": you should see sidecar listed as connected."
+      - heading "Your first artifact" [level=2] [ref=e49]
+      - paragraph [ref=e50]: "You don't call sidecar directly — Claude does. Ask for something visual:"
+      - code [ref=e52]: › show me three layout options for the settings screen on the canvas
+      - paragraph [ref=e53]:
+        - text: Claude creates an artifact (a complete HTML document), your browser opens the canvas, and the artifact renders live. When the artifact contains buttons wired to
+        - code [ref=e54]: claude.send(...)
+        - text: ", clicking one delivers the payload back into the conversation, and Claude continues with your choice."
+      - paragraph [ref=e55]: "That's the whole product: Claude shows, you click, Claude continues."
+      - heading "Architecture" [level=2] [ref=e56]
+      - paragraph [ref=e57]: "Sidecar is one process with two faces: an MCP server on stdio (facing Claude Code) and an HTTP server on localhost (facing your browser)."
+      - generic [ref=e58]:
+        - generic [ref=e59]:
+          - generic [ref=e60]: Claude Code
+          - generic [ref=e61]: spawns the server, calls MCP tools
+        - generic [ref=e62]:
+          - text: ⇄
+          - generic [ref=e63]: MCP / stdio
+        - generic [ref=e64]:
+          - generic [ref=e65]: sidecar process
+          - generic [ref=e66]: artifact store · interaction queue · session token
+        - generic [ref=e67]:
+          - text: ⇄
+          - generic [ref=e68]: HTTP 127.0.0.1
+        - generic [ref=e69]:
+          - generic [ref=e70]: Browser canvas
+          - generic [ref=e71]: renders artifacts (SSE live), forwards clicks
+      - paragraph [ref=e72]:
+        - text: The interesting part is the return path. A click in the browser POSTs to the webhook and lands in an in-memory queue. Claude consumes the queue in one of two ways (
+        - link "below" [ref=e73] [cursor=pointer]:
+          - /url: "#receiving"
+        - text: ) — in both cases the payload arrives as ordinary tool/command output, which is why sidecar works without any push mechanism (like Claude Code channels) being available.
+      - paragraph [ref=e74]:
+        - text: Artifacts render inside a sandboxed iframe with an opaque origin. Artifact code can't reach the canvas shell, the session token, or the server; its only output channel is
+        - code [ref=e75]: claude.send()
+        - text: ", which crosses a postMessage bridge that the canvas shell validates and forwards with the token."
+      - 'heading "Receiving input: two patterns" [level=2] [ref=e76]'
+      - heading "1. Blocking tool — quick decisions" [level=3] [ref=e77]
+      - paragraph [ref=e78]:
+        - text: Claude calls
+        - code [ref=e79]: await_interaction
+        - text: right after showing choices. The tool call parks until you click (or times out after up to 120s, in which case Claude simply calls it again). Best when a response is expected within seconds — the answer lands in the same turn.
+      - heading "2. Background watcher — long waits" [level=3] [ref=e80]
+      - paragraph [ref=e81]: "Claude starts a background shell task against the long-poll endpoint and keeps working. When you eventually click, the watcher exits and Claude Code re-invokes Claude with the payload:"
+      - code [ref=e83]: curl -s "http://127.0.0.1:<port>/api/wait?token=<token>&artifact_id=<id>"
+      - paragraph [ref=e84]: "Sidecar's server instructions teach Claude both patterns each session — with the real port and token baked in — plus the rule of thumb: block for quick picks, watch in the background when the user may take minutes."
+      - generic [ref=e85]: "Why artifact_id matters: both consumers accept an artifact filter. Passing it means a stale click on some older artifact can't be mistaken for the answer to the current question — non-matching interactions stay queued."
+      - heading "Sessions & files" [level=2] [ref=e86]
+      - paragraph [ref=e87]:
+        - text: Each Claude Code session runs its own sidecar. The server prefers port
+        - code [ref=e88]: "8765"
+        - text: (override with the
+        - code [ref=e89]: SIDECAR_PORT
+        - text: env var); if another session already holds it, it falls back to an ephemeral port instead of crashing.
+      - paragraph [ref=e90]:
+        - text: Per-project state lives in
+        - code [ref=e91]: .sidecar/
+        - text: under the directory Claude Code runs in (add it to
+        - code [ref=e92]: .gitignore
+        - text: "):"
+      - table [ref=e93]:
+        - rowgroup [ref=e94]:
+          - row "File Contents" [ref=e95]:
+            - columnheader "File" [ref=e96]
+            - columnheader "Contents" [ref=e97]
+          - 'row "session.json This session''s coordinates: { pid, port, url, token, startedAt }. How external callers discover the port and auth token. Removed on clean exit." [ref=e98]':
+            - cell "session.json" [ref=e99]:
+              - code [ref=e100]: session.json
+            - 'cell "This session''s coordinates: { pid, port, url, token, startedAt }. How external callers discover the port and auth token. Removed on clean exit." [ref=e101]':
+              - text: "This session's coordinates:"
+              - code [ref=e102]: "{ pid, port, url, token, startedAt }"
+              - text: . How external callers discover the port and auth token. Removed on clean exit.
+          - row "artifacts.json Canvas contents, restored on restart so a session bounce doesn't empty the canvas." [ref=e103]:
+            - cell "artifacts.json" [ref=e104]:
+              - code [ref=e105]: artifacts.json
+            - cell "Canvas contents, restored on restart so a session bounce doesn't empty the canvas." [ref=e106]
+          - row "interactions.jsonl Append-only log of every interaction (one JSON object per line, with seq, receivedAt, kind, artifactId, payload). Rotates to .old at 5 MB. tail -f it to watch the loop live." [ref=e107]:
+            - cell "interactions.jsonl" [ref=e108]:
+              - code [ref=e109]: interactions.jsonl
+            - cell "Append-only log of every interaction (one JSON object per line, with seq, receivedAt, kind, artifactId, payload). Rotates to .old at 5 MB. tail -f it to watch the loop live." [ref=e110]:
+              - text: Append-only log of every interaction (one JSON object per line, with
+              - code [ref=e111]: seq
+              - text: ","
+              - code [ref=e112]: receivedAt
+              - text: ","
+              - code [ref=e113]: kind
+              - text: ","
+              - code [ref=e114]: artifactId
+              - text: ","
+              - code [ref=e115]: payload
+              - text: ). Rotates to
+              - code [ref=e116]: .old
+              - text: at 5 MB.
+              - code [ref=e117]: tail -f
+              - text: it to watch the loop live.
+      - heading "MCP tools" [level=2] [ref=e118]
+      - paragraph [ref=e119]:
+        - text: Six tools, prefixed
+        - code [ref=e120]: mcp__plugin_sidecar_sidecar__
+        - text: when installed as a plugin.
+      - heading "create_artifact" [level=3] [ref=e121]
+      - table [ref=e122]:
+        - rowgroup [ref=e123]:
+          - row "Param Type Description" [ref=e124]:
+            - columnheader "Param" [ref=e125]
+            - columnheader "Type" [ref=e126]
+            - columnheader "Description" [ref=e127]
+          - row "title string, required Shown in the canvas sidebar" [ref=e128]:
+            - cell "title" [ref=e129]:
+              - code [ref=e130]: title
+            - cell "string, required" [ref=e131]
+            - cell "Shown in the canvas sidebar" [ref=e132]
+          - row "html string, required Complete, self-contained HTML document" [ref=e133]:
+            - cell "html" [ref=e134]:
+              - code [ref=e135]: html
+            - cell "string, required" [ref=e136]
+            - cell "Complete, self-contained HTML document" [ref=e137]
+          - row "open boolean Open the browser if no canvas tab is connected (default true)" [ref=e138]:
+            - cell "open" [ref=e139]:
+              - code [ref=e140]: open
+            - cell "boolean" [ref=e141]
+            - cell "Open the browser if no canvas tab is connected (default true)" [ref=e142]:
+              - text: Open the browser if no canvas tab is connected (default
+              - code [ref=e143]: "true"
+              - text: )
+      - paragraph [ref=e144]: Returns the artifact id and canvas URL. New artifacts take focus on connected tabs automatically.
+      - heading "update_artifact" [level=3] [ref=e145]
+      - table [ref=e146]:
+        - rowgroup [ref=e147]:
+          - row "Param Type Description" [ref=e148]:
+            - columnheader "Param" [ref=e149]
+            - columnheader "Type" [ref=e150]
+            - columnheader "Description" [ref=e151]
+          - row "id string, required Id from create_artifact" [ref=e152]:
+            - cell "id" [ref=e153]:
+              - code [ref=e154]: id
+            - cell "string, required" [ref=e155]
+            - cell "Id from create_artifact" [ref=e156]:
+              - text: Id from
+              - code [ref=e157]: create_artifact
+          - row "html string, required Replacement HTML document" [ref=e158]:
+            - cell "html" [ref=e159]:
+              - code [ref=e160]: html
+            - cell "string, required" [ref=e161]
+            - cell "Replacement HTML document" [ref=e162]
+          - row "title string New title (optional)" [ref=e163]:
+            - cell "title" [ref=e164]:
+              - code [ref=e165]: title
+            - cell "string" [ref=e166]
+            - cell "New title (optional)" [ref=e167]
+      - paragraph [ref=e168]: Connected tabs hot-reload the artifact. Prefer updating over creating a new artifact when iterating on feedback — it keeps the sidebar clean and the user's focus in place.
+      - heading "await_interaction" [level=3] [ref=e169]
+      - table [ref=e170]:
+        - rowgroup [ref=e171]:
+          - row "Param Type Description" [ref=e172]:
+            - columnheader "Param" [ref=e173]
+            - columnheader "Type" [ref=e174]
+            - columnheader "Description" [ref=e175]
+          - row "artifact_id string Only accept interactions from this artifact; others stay queued" [ref=e176]:
+            - cell "artifact_id" [ref=e177]:
+              - code [ref=e178]: artifact_id
+            - cell "string" [ref=e179]
+            - cell "Only accept interactions from this artifact; others stay queued" [ref=e180]
+          - row "timeout_seconds number How long to block (default 25, max 120)" [ref=e181]:
+            - cell "timeout_seconds" [ref=e182]:
+              - code [ref=e183]: timeout_seconds
+            - cell "number" [ref=e184]
+            - cell "How long to block (default 25, max 120)" [ref=e185]
+      - paragraph [ref=e186]: "Returns the oldest matching queued interaction immediately if one exists, otherwise blocks. On success:"
+      - code [ref=e188]: "status=received [2026-07-05T00:04:22.597Z] from artifact a1-xq5zj (\"Plugin install check\"): {\"install\":\"confirmed\"}"
+      - paragraph [ref=e189]:
+        - text: On timeout it returns
+        - code [ref=e190]: status=no_response
+        - text: — the caller just calls again to keep waiting.
+      - heading "get_interactions" [level=3] [ref=e191]
+      - paragraph [ref=e192]: No parameters. Drains all queued interactions without blocking — useful for catching clicks that happened while Claude was doing other work.
+      - heading "list_artifacts / remove_artifact" [level=3] [ref=e193]
+      - paragraph [ref=e194]:
+        - code [ref=e195]: list_artifacts
+        - text: lists id, title, and timestamps for everything on the canvas.
+        - code [ref=e196]: remove_artifact
+        - text: takes an
+        - code [ref=e197]: id
+        - text: and removes it; connected tabs move to the newest remaining artifact.
+      - heading "HTTP API" [level=2] [ref=e198]
+      - paragraph [ref=e199]:
+        - text: Bound to
+        - code [ref=e200]: 127.0.0.1
+        - text: only. The two
+        - code [ref=e201]: /api/*
+        - text: endpoints require the session token — via the
+        - code [ref=e202]: X-Sidecar-Token
+        - text: header, a
+        - code [ref=e203]: "?token="
+        - text: query param, or
+        - code [ref=e204]: "Authorization: Bearer"
+        - text: .
+      - table [ref=e205]:
+        - rowgroup [ref=e206]:
+          - row "Endpoint Auth Description" [ref=e207]:
+            - columnheader "Endpoint" [ref=e208]
+            - columnheader "Auth" [ref=e209]
+            - columnheader "Description" [ref=e210]
+          - row "GET / — The canvas UI" [ref=e211]:
+            - cell "GET /" [ref=e212]:
+              - code [ref=e213]: GET /
+            - cell "—" [ref=e214]
+            - cell "The canvas UI" [ref=e215]
+          - 'row "GET /events — SSE stream: a snapshot event on connect, then created / updated / removed" [ref=e216]':
+            - cell "GET /events" [ref=e217]:
+              - code [ref=e218]: GET /events
+            - cell "—" [ref=e219]
+            - 'cell "SSE stream: a snapshot event on connect, then created / updated / removed" [ref=e220]':
+              - text: "SSE stream: a"
+              - code [ref=e221]: snapshot
+              - text: event on connect, then
+              - code [ref=e222]: created
+              - text: /
+              - code [ref=e223]: updated
+              - text: /
+              - code [ref=e224]: removed
+          - row "GET /artifact/:id — Artifact HTML with the claude.send() helper injected" [ref=e225]:
+            - cell "GET /artifact/:id" [ref=e226]:
+              - code [ref=e227]: GET /artifact/:id
+            - cell "—" [ref=e228]
+            - cell "Artifact HTML with the claude.send() helper injected" [ref=e229]:
+              - text: Artifact HTML with the
+              - code [ref=e230]: claude.send()
+              - text: helper injected
+          - 'row "POST /api/webhook token Queue a payload for Claude. JSON body { artifactId, payload } is recorded as an artifact interaction; anything else is recorded as an external webhook event, body forwarded as-is" [ref=e231]':
+            - cell "POST /api/webhook" [ref=e232]:
+              - code [ref=e233]: POST /api/webhook
+            - cell "token" [ref=e234]
+            - 'cell "Queue a payload for Claude. JSON body { artifactId, payload } is recorded as an artifact interaction; anything else is recorded as an external webhook event, body forwarded as-is" [ref=e235]':
+              - text: Queue a payload for Claude. JSON body
+              - code [ref=e236]: "{ artifactId, payload }"
+              - text: is recorded as an artifact interaction; anything else is recorded as an external webhook event, body forwarded as-is
+          - 'row "GET /api/wait token Long-poll: returns the next interaction as JSON. ?artifact_id= filters; ?timeout=SECS caps the wait (then 408); no timeout means wait indefinitely" [ref=e237]':
+            - cell "GET /api/wait" [ref=e238]:
+              - code [ref=e239]: GET /api/wait
+            - cell "token" [ref=e240]
+            - 'cell "Long-poll: returns the next interaction as JSON. ?artifact_id= filters; ?timeout=SECS caps the wait (then 408); no timeout means wait indefinitely" [ref=e241]':
+              - text: "Long-poll: returns the next interaction as JSON."
+              - code [ref=e242]: "?artifact_id="
+              - text: filters;
+              - code [ref=e243]: "?timeout=SECS"
+              - text: caps the wait (then
+              - code [ref=e244]: "408"
+              - text: ); no timeout means wait indefinitely
+          - 'row "GET /health — { ok, artifacts, canvasTabs, queuedInteractions }" [ref=e245]':
+            - cell "GET /health" [ref=e246]:
+              - code [ref=e247]: GET /health
+            - cell "—" [ref=e248]
+            - 'cell "{ ok, artifacts, canvasTabs, queuedInteractions }" [ref=e249]':
+              - code [ref=e250]: "{ ok, artifacts, canvasTabs, queuedInteractions }"
+      - heading "claude.send()" [level=2] [ref=e251]
+      - paragraph [ref=e252]:
+        - text: Every artifact gets a
+        - code [ref=e253]: claude
+        - text: "global injected before its own scripts run. One method:"
+      - code [ref=e255]: claude.send(payload) // → Promise<boolean>
+      - list [ref=e256]:
+        - listitem [ref=e257]:
+          - code [ref=e258]: payload
+          - text: is any JSON-serializable value; it arrives in Claude's context verbatim.
+        - listitem [ref=e259]:
+          - text: Resolves
+          - code [ref=e260]: "true"
+          - text: once the canvas shell confirms delivery; the shell also shows a "✓ Sent to Claude" toast.
+        - listitem [ref=e261]:
+          - text: Resolves
+          - code [ref=e262]: "false"
+          - text: if delivery fails or times out (5s), or if the identical payload was sent within the last 1.5s — the built-in double-click debounce.
+      - paragraph [ref=e263]:
+        - text: Under the hood the sandboxed artifact posts a message to the canvas shell, which attaches the session token and forwards to
+        - code [ref=e264]: /api/webhook
+        - text: . Artifact code never handles the token.
+      - heading "Writing artifacts" [level=2] [ref=e265]
+      - paragraph [ref=e266]:
+        - text: Artifacts are complete HTML documents rendered in a sandboxed iframe (
+        - code [ref=e267]: allow-scripts allow-forms allow-popups
+        - text: ", opaque origin). Practical rules:"
+      - list [ref=e268]:
+        - listitem [ref=e269]: Inline everything. The opaque origin means same-origin API calls are blocked and cross-origin requests fail CORS. No CDNs, no external fonts — inline CSS and JS only.
+        - listitem [ref=e270]:
+          - text: No storage.
+          - code [ref=e271]: localStorage
+          - text: /
+          - code [ref=e272]: cookies
+          - text: are unavailable. Keep state in JS variables; if it must survive, send it to Claude.
+        - listitem [ref=e273]:
+          - generic [ref=e274]:
+            - code [ref=e275]: claude.send()
+            - text: is the only output.
+          - text: Design every artifact around the payload you want back.
+      - 'heading "Pattern: choice cards" [level=3] [ref=e276]'
+      - code [ref=e278]: "<button onclick=\"claude.send({ choice: 'option-a' })\">Choose A</button> <button onclick=\"claude.send({ choice: 'option-b' })\">Choose B</button>"
+      - 'heading "Pattern: form submission" [level=3] [ref=e279]'
+      - code [ref=e281]: <form onsubmit="event.preventDefault(); claude.send(Object.fromEntries(new FormData(event.target)))"> <input name="title" /> <textarea name="notes"></textarea> <button>Send to Claude</button> </form>
+      - 'heading "Pattern: approve / iterate bar" [level=3] [ref=e282]'
+      - code [ref=e284]: "claude.send({ verdict: 'approve' }) claude.send({ verdict: 'iterate', notes: field.value })"
+      - paragraph [ref=e285]:
+        - text: Give the user visual confirmation on top of the toast — flip the clicked button's label, highlight the selected card — and structure payloads as small objects (
+        - code [ref=e286]: "{ choice, notes }"
+        - text: ) rather than bare strings, so the receiving side stays unambiguous.
+      - heading "External webhooks" [level=2] [ref=e287]
+      - paragraph [ref=e288]:
+        - text: Anything that can POST can push events into the session — CI, scripts, other tools. Read the session coordinates from
+        - code [ref=e289]: .sidecar/session.json
+        - text: ":"
+      - code [ref=e291]: "url=$(jq -r .url .sidecar/session.json) token=$(jq -r .token .sidecar/session.json) curl -X POST -H \"X-Sidecar-Token: $token\" \\ -d \"build failed on main: https://ci.example.com/run/1234\" \\ \"$url/api/webhook\""
+      - paragraph [ref=e292]:
+        - text: Non-artifact payloads are tagged
+        - code [ref=e293]: "kind: \"webhook\""
+        - text: and reach Claude through the same queue — a waiting
+        - code [ref=e294]: await_interaction
+        - text: (without an artifact filter) or
+        - code [ref=e295]: /api/wait
+        - text: picks them up.
+      - heading "Security model" [level=2] [ref=e296]
+      - list [ref=e297]:
+        - listitem [ref=e298]:
+          - text: Localhost only. The HTTP server binds
+          - code [ref=e299]: 127.0.0.1
+          - text: ; nothing off the machine can reach it. Don't port-forward or tunnel it — anything that reaches the webhook is eventually placed in front of Claude.
+        - listitem [ref=e300]:
+          - text: Per-session token. Without auth, any webpage you visit could fire cross-site POSTs at localhost and inject text into your session. Both
+          - code [ref=e301]: /api/*
+          - text: endpoints require a random 128-bit token generated at startup. Web pages can't read it (it lives in
+          - code [ref=e302]: session.json
+          - text: and the canvas shell); local processes can, and are trusted anyway.
+        - listitem [ref=e303]: Sandboxed artifacts. Artifact HTML is authored by Claude, which makes it semi-trusted — a prompt-injected artifact shouldn't get free rein. The opaque-origin sandbox denies it the token, the canvas DOM, storage, and same-origin network; the canvas shell only accepts messages from the artifact iframe it created.
+        - listitem [ref=e304]: "Interactions are user input. Sidecar instructs Claude to treat payloads as coming from you. Keep that in mind if you point external systems at the webhook: whatever they post is read by Claude with that framing."
+      - heading "Development" [level=2] [ref=e305]
+      - code [ref=e307]: "git clone https://github.com/smarchetti/agent-sidecar cd agent-sidecar bun install bun test # 24 end-to-end tests over real MCP stdio"
+      - paragraph [ref=e308]:
+        - text: Source lives in
+        - code [ref=e309]: src/
+        - text: (
+        - code [ref=e310]: sidecar.ts
+        - text: is the whole server;
+        - code [ref=e311]: canvas.html
+        - text: "is the browser shell, inlined into the bundle at build time). To run your working copy in a live session:"
+      - code [ref=e313]: claude --mcp-config dev.mcp.json
+      - generic [ref=e314]: "Two sidecars warning: if the plugin is installed globally, a dev session loads both the plugin server and your working copy. Ports won't collide (ephemeral fallback), but you'll have duplicate tool sets — disable the plugin while developing."
+      - paragraph [ref=e315]:
+        - text: "Releasing: bump"
+        - code [ref=e316]: version
+        - text: in
+        - code [ref=e317]: package.json
+        - text: and the
+        - code [ref=e318]: agent-sidecar@<version>
+        - text: pin in
+        - code [ref=e319]: .claude-plugin/plugin.json
+        - text: ", then"
+        - code [ref=e320]: npm publish
+        - text: (the
+        - code [ref=e321]: prepublishOnly
+        - text: hook rebuilds
+        - code [ref=e322]: dist/sidecar.js
+        - text: ). Publish
+        - emphasis [ref=e323]: before
+        - text: pushing the manifest, so it never points at a version that doesn't exist.
+      - heading "Troubleshooting" [level=2] [ref=e324]
+      - table [ref=e325]:
+        - rowgroup [ref=e326]:
+          - row "Symptom Check" [ref=e327]:
+            - columnheader "Symptom" [ref=e328]
+            - columnheader "Check" [ref=e329]
+          - row "Plugin doesn't load /mcp shows sidecar? Is bun on PATH? First launch fetches from npm — needs network once." [ref=e330]:
+            - cell "Plugin doesn't load" [ref=e331]
+            - cell "/mcp shows sidecar? Is bun on PATH? First launch fetches from npm — needs network once." [ref=e332]:
+              - code [ref=e333]: /mcp
+              - text: shows sidecar? Is
+              - code [ref=e334]: bun
+              - text: on PATH? First launch fetches from npm — needs network once.
+          - row "Canvas didn't open The URL is in every create_artifact result and in .sidecar/session.json. Auto-open only fires when no tab is connected." [ref=e335]:
+            - cell "Canvas didn't open" [ref=e336]
+            - cell "The URL is in every create_artifact result and in .sidecar/session.json. Auto-open only fires when no tab is connected." [ref=e337]:
+              - text: The URL is in every
+              - code [ref=e338]: create_artifact
+              - text: result and in
+              - code [ref=e339]: .sidecar/session.json
+              - text: . Auto-open only fires when no tab is connected.
+          - row "Clicks not arriving tail -f .sidecar/interactions.jsonl — if clicks appear there, Claude just hasn't consumed them yet (get_interactions drains). If not, check GET /health and the browser console." [ref=e340]:
+            - cell "Clicks not arriving" [ref=e341]
+            - cell "tail -f .sidecar/interactions.jsonl — if clicks appear there, Claude just hasn't consumed them yet (get_interactions drains). If not, check GET /health and the browser console." [ref=e342]:
+              - code [ref=e343]: tail -f .sidecar/interactions.jsonl
+              - text: — if clicks appear there, Claude just hasn't consumed them yet (
+              - code [ref=e344]: get_interactions
+              - text: drains). If not, check
+              - code [ref=e345]: GET /health
+              - text: and the browser console.
+          - row "Wrong port Another session holds 8765; this one fell back to an ephemeral port. session.json always has the live URL." [ref=e346]:
+            - cell "Wrong port" [ref=e347]
+            - cell "Another session holds 8765; this one fell back to an ephemeral port. session.json always has the live URL." [ref=e348]:
+              - text: Another session holds 8765; this one fell back to an ephemeral port.
+              - code [ref=e349]: session.json
+              - text: always has the live URL.
+          - row "403 from the API Missing/stale token — re-read session.json; the token rotates every session." [ref=e350]:
+            - cell "403 from the API" [ref=e351]
+            - cell "Missing/stale token — re-read session.json; the token rotates every session." [ref=e352]:
+              - text: Missing/stale token — re-read
+              - code [ref=e353]: session.json
+              - text: ; the token rotates every session.
+          - row "Old version running Plugin pins agent-sidecar@<version>. Update the plugin, restart Claude Code." [ref=e354]:
+            - cell "Old version running" [ref=e355]
+            - cell "Plugin pins agent-sidecar@<version>. Update the plugin, restart Claude Code." [ref=e356]:
+              - text: Plugin pins
+              - code [ref=e357]: agent-sidecar@<version>
+              - text: . Update the plugin, restart Claude Code.
