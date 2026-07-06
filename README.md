@@ -2,17 +2,17 @@
 
 [![CI](https://github.com/smarchetti/agent-sidecar/actions/workflows/ci.yml/badge.svg)](https://github.com/smarchetti/agent-sidecar/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/agent-sidecar?color=d97757)](https://www.npmjs.com/package/agent-sidecar)
-[![docs](https://img.shields.io/badge/docs-smarchetti.github.io-d97757)](https://smarchetti.github.io/agent-sidecar/docs.html)
+[![docs](https://img.shields.io/badge/docs-agent--sidecar.vercel.app-d97757)](https://agent-sidecar.vercel.app/docs.html)
 
 **A visual canvas for coding agents.** Your agent shows you interactive HTML — design options, forms, previews, dashboards — in your browser, and your clicks flow straight back into the conversation. Works with Claude Code, Cursor, Codex, or any MCP client.
 
-[![The loop: a terminal asks for design options, a glowing canvas shows three choices, the click flows back as JSON](https://smarchetti.github.io/agent-sidecar/og.png)](https://smarchetti.github.io/agent-sidecar/)
+[![The loop: a terminal asks for design options, a glowing canvas shows three choices, the click flows back as JSON](https://agent-sidecar.vercel.app/og.png)](https://agent-sidecar.vercel.app/)
 
 > *"Show me three layout options for the settings screen"* → three clickable mockups appear on the canvas → you click one → Claude continues with your choice.
 
 agent-sidecar is an MCP server with an embedded web server, packaged as a Claude Code plugin — and usable from [any MCP client](#use-with-other-agents). It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-agent return path is a long-poll the server turns into ordinary tool output.
 
-**Website & full docs → [smarchetti.github.io/agent-sidecar](https://smarchetti.github.io/agent-sidecar/)** ([documentation](https://smarchetti.github.io/agent-sidecar/docs.html))
+**Website & full docs → [agent-sidecar.vercel.app](https://agent-sidecar.vercel.app/)** ([documentation](https://agent-sidecar.vercel.app/docs.html))
 
 ## Quick start
 
@@ -72,11 +72,11 @@ url=$(jq -r .url .sidecar/session.json); token=$(jq -r .token .sidecar/session.j
 curl -X POST -H "X-Sidecar-Token: $token" -d "build failed on main" "$url/api/webhook"
 ```
 
-Full parameter tables, artifact-authoring patterns, and the security model are in the **[docs](https://smarchetti.github.io/agent-sidecar/docs.html)**.
+Full parameter tables, artifact-authoring patterns, and the security model are in the **[docs](https://agent-sidecar.vercel.app/docs.html)**.
 
 ## Security in one paragraph
 
-Localhost-only binding; a random per-session token required on `/api/webhook` and `/api/wait` (defeats cross-site POSTs from web pages at localhost); artifacts run in an opaque-origin sandboxed iframe with no access to the token, the canvas shell, storage, or same-origin network — `claude.send()` is their only output channel. Don't tunnel or port-forward the server: anything that reaches the webhook is eventually placed in front of Claude. [Details.](https://smarchetti.github.io/agent-sidecar/docs.html#security)
+Localhost-only binding; a random per-session token required on `/api/webhook` and `/api/wait` (defeats cross-site POSTs from web pages at localhost); artifacts run in an opaque-origin sandboxed iframe with no access to the token, the canvas shell, storage, or same-origin network — `claude.send()` is their only output channel. Don't tunnel or port-forward the server: anything that reaches the webhook is eventually placed in front of Claude. [Details.](https://agent-sidecar.vercel.app/docs.html#security)
 
 ## Development
 
@@ -86,7 +86,7 @@ bun test                              # 24 end-to-end tests over real MCP stdio
 claude --mcp-config dev.mcp.json      # run your working copy live (disable the plugin first)
 ```
 
-Source is `src/sidecar.ts` (the whole server) and `src/canvas.html` (the browser shell, inlined into the bundle). Releases: bump `package.json` and the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, then `npm publish` — publish **before** pushing, so the manifest never points at an unpublished version.
+Source is `src/sidecar.ts` (the whole server) and `src/canvas.html` (the browser shell, inlined into the bundle). Releases: bump `package.json`, the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, and CHANGELOG, then push and tag `vX.Y.Z` — GitHub Actions tests, publishes to npm with provenance, and cuts the release.
 
 ## License
 

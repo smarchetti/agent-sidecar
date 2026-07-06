@@ -14,7 +14,7 @@
     "type": "git",
     "url": "git+https://github.com/smarchetti/agent-sidecar.git"
   },
-  "homepage": "https://smarchetti.github.io/agent-sidecar/",
+  "homepage": "https://agent-sidecar.vercel.app/",
   "keywords": [
     "claude",
     "claude-code",
