@@ -6,6 +6,8 @@
 
 **A visual canvas for coding agents.** Your agent shows you interactive HTML — design options, forms, previews, dashboards — in your browser, and your clicks flow straight back into the conversation. Works with Claude Code, Cursor, Codex, or any MCP client.
 
+[![The loop: a terminal asks for design options, a glowing canvas shows three choices, the click flows back as JSON](https://smarchetti.github.io/agent-sidecar/og.png)](https://smarchetti.github.io/agent-sidecar/)
+
 > *"Show me three layout options for the settings screen"* → three clickable mockups appear on the canvas → you click one → Claude continues with your choice.
 
 agent-sidecar is an MCP server with an embedded web server, packaged as a Claude Code plugin — and usable from [any MCP client](#use-with-other-agents). It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-agent return path is a long-poll the server turns into ordinary tool output.

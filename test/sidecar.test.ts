@@ -294,6 +294,35 @@ describe('GET /api/wait (background watcher)', () => {
   })
 })
 
+describe('canvas notes', () => {
+  test('a note is delivered to an unfiltered wait, attributed to the user', async () => {
+    await webhook({ kind: 'note', note: 'actually, make it green' }, { token: session.token })
+    await Bun.sleep(100)
+    const res = await client.callTool({ name: 'await_interaction', arguments: { timeout_seconds: 5 } })
+    expect(text(res)).toContain('status=received')
+    expect(text(res)).toContain('typed into the canvas')
+    expect(text(res)).toContain('actually, make it green')
+  })
+
+  test('notes are skipped by artifact-filtered waits and stay queued', async () => {
+    await webhook({ kind: 'note', note: 'a stray thought' }, { token: session.token })
+    await Bun.sleep(100)
+    const miss = await client.callTool({
+      name: 'await_interaction',
+      arguments: { artifact_id: 'some-artifact', timeout_seconds: 1 },
+    })
+    expect(text(miss)).toContain('status=no_response')
+    const drained = await client.callTool({ name: 'get_interactions', arguments: {} })
+    expect(text(drained)).toContain('a stray thought')
+  })
+
+  test('canvas shell ships the composer', async () => {
+    const canvas = await (await fetch(base)).text()
+    expect(canvas).toContain('note-input')
+    expect(canvas).toContain("kind: 'note'")
+  })
+})
+
 describe('interaction log', () => {
   test('interactions.jsonl records everything with seq/kind/payload', async () => {
     const jsonl = await Bun.file(join(WORKDIR, '.sidecar', 'interactions.jsonl')).text()
@@ -301,7 +330,7 @@ describe('interaction log', () => {
     expect(lines.length).toBeGreaterThanOrEqual(5)
     for (const l of lines) {
       expect(l.seq).toBeGreaterThan(0)
-      expect(['interaction', 'webhook']).toContain(l.kind)
+      expect(['interaction', 'webhook', 'note']).toContain(l.kind)
       expect(l.receivedAt).toBeString()
     }
   })

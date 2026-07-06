@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>404 — agent-sidecar</title>
+<meta name="robots" content="noindex" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23ff9e64'%3E✳%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Martian+Mono:wght@400&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink-0: oklch(15.5% 0.012 55);
+    --ink-1: oklch(19% 0.014 55);
+    --line: oklch(31% 0.02 55);
+    --text: oklch(93% 0.012 65);
+    --text-dim: oklch(76% 0.022 60);
+    --ember: oklch(74% 0.155 45);
+    --ember-ink: oklch(22% 0.05 45);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--ink-0); color: var(--text);
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    padding: 24px;
+  }
+  .term {
+    background: var(--ink-1); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 30px; max-width: 460px; width: 100%;
+    font-family: "Martian Mono", ui-monospace, monospace; font-size: 13px; line-height: 2.1;
+  }
+  .term .chrome { display: flex; gap: 7px; margin-bottom: 16px; }
+  .term .chrome i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-0); border: 1px solid var(--line); display: block; }
+  .u { color: var(--ember); }
+  .d { color: var(--text-dim); }
+  h1 { font-size: 15px; font-weight: 600; display: inline; }
+  a {
+    display: inline-block; margin-top: 18px;
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    background: var(--ember); color: var(--ember-ink);
+    text-decoration: none; font-weight: 600; font-size: 14px;
+    padding: 10px 20px; border-radius: 9px;
+  }
+</style>
+</head>
+<body>
+  <div class="term">
+    <div class="chrome"><i></i><i></i><i></i></div>
+    <div><span class="u">›</span> <h1>status=no_response</h1></div>
+    <div class="d">404 — no artifact at this address.</div>
+    <div class="d">The canvas is empty here. Try again from the top.</div>
+    <a href="./index.html">← back to agent-sidecar</a>
+  </div>
+</body>
+</html>

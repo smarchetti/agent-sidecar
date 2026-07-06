@@ -4,115 +4,156 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>agent-sidecar</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E✳%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23ff9e64'%3E✳%3C/text%3E%3C/svg%3E" />
 <style>
   :root {
-    --bg: #16161d;
-    --panel: #1e1e28;
-    --panel-hover: #262633;
-    --border: #2e2e3d;
-    --text: #e8e8f0;
-    --text-dim: #8a8a9e;
-    --accent: #d97757;
-    --ok: #5fb87a;
+    --ink-0: oklch(15.5% 0.012 55);
+    --ink-1: oklch(19% 0.014 55);
+    --ink-2: oklch(24% 0.018 55);
+    --line: oklch(31% 0.02 55);
+    --text: oklch(93% 0.012 65);
+    --text-dim: oklch(76% 0.022 60);
+    --ember: oklch(74% 0.155 45);
+    --ember-hot: oklch(81% 0.16 55);
+    --ember-ink: oklch(22% 0.05 45);
+    --ok: oklch(78% 0.14 155);
+    --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     display: flex;
-    background: var(--bg);
+    background: var(--ink-0);
     color: var(--text);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font: 14px/1.5 var(--font-sans);
   }
+  ::selection { background: var(--ember); color: var(--ember-ink); }
 
   #sidebar {
-    width: 240px;
-    min-width: 240px;
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid var(--border);
-    background: var(--panel);
+    width: 248px; min-width: 248px;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--line);
+    background: var(--ink-1);
   }
   #sidebar header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-    font-weight: 600;
+    display: flex; align-items: center; gap: 9px;
+    padding: 15px 16px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600; letter-spacing: -0.01em;
   }
+  #sidebar header .mark { color: var(--ember); font-size: 16px; }
   #status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #c4554d;
-    transition: background .3s;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: oklch(58% 0.18 25);
+    margin-left: auto;
+    transition: background .3s, box-shadow .3s;
   }
-  #status-dot.connected { background: var(--ok); }
+  #status-dot.connected { background: var(--ok); box-shadow: 0 0 8px oklch(78% 0.14 155 / 0.5); }
 
   #artifact-list { flex: 1; overflow-y: auto; padding: 8px; }
   .artifact-item {
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: 9px;
     cursor: pointer;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     border: 1px solid transparent;
   }
-  .artifact-item:hover { background: var(--panel-hover); }
-  .artifact-item.active { background: var(--panel-hover); border-color: var(--accent); }
+  .artifact-item:hover { background: var(--ink-2); }
+  .artifact-item.active {
+    background: oklch(74% 0.155 45 / 0.1);
+    border-color: oklch(74% 0.155 45 / 0.4);
+  }
   .artifact-item .title {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-weight: 500;
+    font-weight: 500; font-size: 13.5px;
   }
-  .artifact-item .time { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+  .artifact-item.active .title { color: var(--ember-hot); }
+  .artifact-item .time { color: var(--text-dim); font-size: 11px; font-family: var(--font-mono); margin-top: 3px; }
 
-  #empty-note {
-    color: var(--text-dim);
-    padding: 24px 16px;
-    text-align: center;
-  }
+  #empty-note { color: var(--text-dim); padding: 26px 16px; text-align: center; font-size: 13px; }
 
-  #main { flex: 1; display: flex; flex-direction: column; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #stage { flex: 1; display: flex; position: relative; min-height: 0; }
   #viewer { flex: 1; border: 0; width: 100%; background: #fff; }
   #placeholder {
     flex: 1; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    color: var(--text-dim); gap: 8px;
+    color: var(--text-dim); gap: 10px;
   }
-  #placeholder .logo { font-size: 40px; }
+  #placeholder .logo { font-size: 38px; color: var(--ember); opacity: .8; }
+
+  /* composer: talk to the agent from the browser, no artifact required */
+  #composer {
+    display: flex; gap: 10px; align-items: center;
+    padding: 12px 14px;
+    border-top: 1px solid var(--line);
+    background: var(--ink-1);
+  }
+  #composer input {
+    flex: 1; min-width: 0;
+    background: var(--ink-0); color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px;
+    padding: 10px 14px; font: 13.5px var(--font-sans);
+    outline: none;
+  }
+  #composer input:focus { border-color: var(--ember); }
+  #composer input::placeholder { color: var(--text-dim); }
+  #composer button {
+    background: var(--ember); color: var(--ember-ink);
+    border: 0; border-radius: 8px;
+    padding: 10px 18px; font: 600 12px var(--font-mono);
+    cursor: pointer;
+  }
+  #composer button:hover { background: var(--ember-hot); }
+  #composer button:disabled { opacity: .5; cursor: default; }
 
   #toast {
     position: fixed;
-    bottom: 20px; left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: var(--ok); color: #10241a;
-    padding: 10px 18px;
+    bottom: 74px; left: 50%;
+    transform: translateX(-50%) translateY(140px);
+    background: var(--ember); color: var(--ember-ink);
+    padding: 9px 18px;
     border-radius: 999px;
-    font-weight: 600;
-    transition: transform .25s ease;
+    font: 600 12.5px var(--font-mono);
+    transition: transform .25s cubic-bezier(0.22, 1, 0.36, 1);
     pointer-events: none;
+    box-shadow: 0 0 24px oklch(74% 0.155 45 / 0.4);
+    z-index: 10;
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
+  @media (prefers-reduced-motion: reduce) {
+    #toast { transition: none; }
+    #status-dot { transition: none; }
+  }
 </style>
 </head>
 <body>
   <div id="sidebar">
     <header>
-      <span id="status-dot" title="connection to sidecar"></span>
+      <span class="mark">✳</span>
       <span>agent-sidecar</span>
+      <span id="status-dot" title="connection to agent-sidecar"></span>
     </header>
     <div id="artifact-list">
-      <div id="empty-note">No artifacts yet.<br/>Ask Claude to show you something.</div>
+      <div id="empty-note">No artifacts yet.<br/>Ask your agent to show you something.</div>
     </div>
   </div>
   <div id="main">
-    <div id="placeholder">
-      <div class="logo">✳</div>
-      <div>Artifacts Claude creates will appear here.</div>
+    <div id="stage">
+      <div id="placeholder">
+        <div class="logo">✳</div>
+        <div>Artifacts your agent creates will appear here.</div>
+      </div>
+      <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
+      <iframe id="viewer" style="display:none" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
     </div>
-    <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
-    <iframe id="viewer" style="display:none" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
+    <div id="composer">
+      <input id="note-input" placeholder="Tell your agent something…" aria-label="Send a note to your agent" />
+      <button id="note-send">send</button>
+    </div>
   </div>
-  <div id="toast">✓ Sent to Claude</div>
+  <div id="toast">✓ Sent</div>
 
 <script>
   const TOKEN = '__SIDECAR_TOKEN__' // injected by the server when this page is served
@@ -122,12 +163,20 @@
   const placeholder = document.getElementById('placeholder')
   const statusDot = document.getElementById('status-dot')
   const toast = document.getElementById('toast')
+  const noteInput = document.getElementById('note-input')
+  const noteSend = document.getElementById('note-send')
 
   let artifactsById = new Map()
   let activeId = null
 
   function fmtTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
+  function showToast(text) {
+    toast.textContent = text || '✓ Sent'
+    toast.classList.add('show')
+    setTimeout(() => toast.classList.remove('show'), 1800)
   }
 
   function renderList() {
@@ -195,8 +244,7 @@
       } else if (msg.type === 'removed') {
         artifactsById.delete(msg.artifact.id)
         if (msg.artifact.id === activeId) {
-          const rest = [...artifactsById.keys()]
-          rest.length ? select(rest[rest.length - 1]) : showEmptyViewer()
+          artifactsById.size ? select(newestId()) : showEmptyViewer()
         } else renderList()
       }
     }
@@ -218,11 +266,30 @@
       ok = res.ok
     } catch {}
     ev.source.postMessage({ type: 'sidecar:sent', id: d.id, ok }, '*')
-    if (ok) {
-      toast.classList.add('show')
-      setTimeout(() => toast.classList.remove('show'), 1800)
-    }
+    if (ok) showToast('✓ Sent')
   })
+
+  // Composer: free-text notes to the agent, no artifact required
+  async function sendNote() {
+    const note = noteInput.value.trim()
+    if (!note) return
+    noteSend.disabled = true
+    try {
+      const res = await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
+        body: JSON.stringify({ kind: 'note', note }),
+      })
+      if (res.ok) {
+        noteInput.value = ''
+        showToast('✓ Note sent')
+      }
+    } catch {}
+    noteSend.disabled = false
+    noteInput.focus()
+  }
+  noteSend.addEventListener('click', sendNote)
+  noteInput.addEventListener('keydown', ev => { if (ev.key === 'Enter') sendNote() })
 </script>
 </body>
 </html>

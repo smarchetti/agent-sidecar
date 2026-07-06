@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 — 2026-07-05
+
+- **Canvas composer**: a free-text input in the canvas shell — tell your agent something from the browser anytime, no artifact required. Notes arrive as a new `note` interaction kind, attributed to the user, and are skipped by artifact-filtered waits.
+- **Canvas restyled** to the ember/ink brand (system fonts, works offline).
+- **Artifact quality bar** added to the server instructions, so agents produce well-designed artifacts by default (layout, accent discipline, button sizing, confirmation states).
+- Releases now publish to npm automatically via GitHub Actions trusted publishing with provenance (tag push → test → publish → GitHub release).
+- Site: OpenGraph/Twitter cards with a hero image, styled 404 page. CI runs on macOS and Linux.
+
 ## 0.7.0 — 2026-07-05
 
 - Rebrand: the plugin, MCP server, and canvas are all named **agent-sidecar** now (install is `/plugin install agent-sidecar@agent-sidecar`; tool prefix becomes `mcp__plugin_agent-sidecar_agent-sidecar__`). Existing installs of the old `sidecar` plugin should uninstall and reinstall. Technical identifiers (`.sidecar/` directory, `SIDECAR_PORT`, `X-Sidecar-Token`) are unchanged.

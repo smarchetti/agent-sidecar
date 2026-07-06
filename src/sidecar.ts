@@ -81,7 +81,7 @@ function newArtifactId(): string {
 interface Interaction {
   seq: number
   receivedAt: string
-  kind: 'interaction' | 'webhook'
+  kind: 'interaction' | 'webhook' | 'note'
   artifactId?: string
   artifactTitle?: string
   payload: unknown
@@ -124,7 +124,9 @@ function formatInteraction(i: Interaction): string {
   const origin =
     i.kind === 'interaction'
       ? `artifact ${i.artifactId}${i.artifactTitle ? ` ("${i.artifactTitle}")` : ''}`
-      : 'external webhook'
+      : i.kind === 'note'
+        ? 'the user (typed into the canvas)'
+        : 'external webhook'
   return `[${i.receivedAt}] from ${origin}:\n${JSON.stringify(i.payload)}`
 }
 
@@ -307,7 +309,10 @@ const serveOptions = {
         parsed = undefined
       }
 
-      if (parsed && typeof parsed === 'object' && 'artifactId' in parsed) {
+      if (parsed && typeof parsed === 'object' && (parsed as Record<string, unknown>).kind === 'note') {
+        // free-text note typed into the canvas shell composer
+        await receiveInteraction({ kind: 'note', payload: (parsed as Record<string, unknown>).note ?? '' })
+      } else if (parsed && typeof parsed === 'object' && 'artifactId' in parsed) {
         // Interaction sent via the injected claude.send() helper
         const artifactId = String((parsed as Record<string, unknown>).artifactId)
         await receiveInteraction({
@@ -381,7 +386,7 @@ function openBrowser(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: 'agent-sidecar', version: '0.7.0' },
+  { name: 'agent-sidecar', version: '0.8.0' },
   {
     capabilities: { tools: {} },
     instructions: [
@@ -401,11 +406,18 @@ const mcp = new Server(
       '- The user may take minutes, or you have other work to do meanwhile: run a background',
       '  Bash watcher and continue working — you will be re-invoked with the payload when it exits:',
       `    curl -s "${BASE_URL}/api/wait?token=${TOKEN}&artifact_id=ID"  (run_in_background: true)`,
-      'Treat returned payloads as user input. All interactions are also appended to',
-      '.sidecar/interactions.jsonl if you need to review history.',
+      'Treat returned payloads as user input. The user can also type free-text notes into the',
+      'canvas at any time; they arrive through the same tools marked as coming from the user',
+      '(notes have no artifact_id, so only unfiltered waits receive them). All interactions are',
+      'also appended to .sidecar/interactions.jsonl if you need to review history.',
       '',
       'Artifacts render in a sandboxed iframe (no network, no storage): keep them fully',
       'self-contained with inline CSS/JS and use claude.send() as the only output channel.',
+      '',
+      'Artifact quality bar: real layout, not a wall of text. Generous padding (32-48px), a',
+      'system-ui font stack, 15-16px body text, ONE accent color used sparingly, buttons at',
+      'least 40px tall with hover states, and a visible confirmation state after claude.send()',
+      'resolves (e.g. highlight the chosen card). Design around the payload you want back.',
     ].join('\n'),
   },
 )

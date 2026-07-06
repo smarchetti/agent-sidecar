@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — agent-sidecar</title>
 <meta name="description" content="Documentation for agent-sidecar: installation, MCP tools, HTTP API, writing artifacts, security model, and development guide." />
+<meta property="og:title" content="agent-sidecar documentation" />
+<meta property="og:description" content="Installation, MCP tools, HTTP API, writing artifacts, security model — everything about agent-sidecar." />
+<meta property="og:image" content="https://smarchetti.github.io/agent-sidecar/og.png" />
+<meta property="og:url" content="https://smarchetti.github.io/agent-sidecar/docs.html" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23ff9e64'%3E✳%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -217,7 +223,7 @@
     <p class="lede">Everything about agent-sidecar: how the canvas works, the MCP tools your agent calls, the HTTP API underneath, and how to write artifacts that talk back.</p>
 
     <div class="pill-row">
-      <span class="pill">version <b>0.7.0</b></span>
+      <span class="pill">version <b>0.8.0</b></span>
       <span class="pill">requires <b>Bun ≥ 1.2</b></span>
       <span class="pill">license <b>MIT</b></span>
       <span class="pill"><b>localhost</b> only</span>
@@ -228,7 +234,7 @@
     <pre><code><span class="c"># in any Claude Code session</span>
 <span class="g">›</span> /plugin marketplace add smarchetti/agent-sidecar
 <span class="g">›</span> /plugin install agent-sidecar@agent-sidecar</code></pre>
-    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.7.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
+    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.8.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
     <p>Verify with <code>/mcp</code>: you should see <b>agent-sidecar</b> listed as connected.</p>
 
     <h2 id="other-agents">Other agents</h2>
@@ -247,7 +253,7 @@
       <li>The helper injected into artifacts is named <code>claude.send()</code> regardless of which agent is driving.</li>
       <li>The <a href="#receiving">background-watcher pattern</a> needs an agent that can run shell commands in the background and surface their output. The blocking <code>await_interaction</code> tool works in every client.</li>
     </ul>
-    <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.7.0"]</code>.</div>
+    <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.8.0"]</code>.</div>
 
     <h2 id="first-artifact">Your first artifact</h2>
     <p>You don't call agent-sidecar directly — your agent does. Ask for something visual:</p>
