@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 — 2026-07-28
+
+**One canvas server per machine, sessions separated in the UI.** Previously every agent session started its own server on its own port, which meant a browser tab per session and a canvas that died with the session.
+
+- **Singleton server.** The first session starts a detached server on port `8765`; every later session — in any project, from any MCP client — attaches to it as a thin client. It outlives your sessions and exits on its own after 30 minutes with no sessions and no canvas tab (`SIDECAR_IDLE_EXIT_MS` to change, `0` to disable).
+- **Sessions in the canvas.** The sidebar lists every session grouped by project and labelled with its git branch; picking one shows its artifacts. Ended sessions stay (dimmed) until dismissed, so you can still read what they produced.
+- **No focus stealing.** An artifact arriving in a session you aren't watching badges that session and shows a clickable toast instead of yanking the view. Within the session you're watching, new artifacts take focus as before.
+- **Interaction routing.** Interactions go to the session that owns the clicked artifact; canvas notes and unaddressed webhooks go to the session you're viewing. `GET /api/wait` and `/api/drain` take a `session=` param and refuse an unknown one rather than serving another session's queue.
+- **New CLI:** `--status`, `--stop`, `--serve`, `--help`.
+- **State moved:** machine-wide `~/.agent-sidecar/` (`server.json`, `state.json`, `server.log`) plus per-project `.sidecar/` (`session.json` now includes `sessionId` and `serverPid`; `interactions.jsonl` unchanged). `artifacts.json` is gone — the canvas is persisted centrally.
+- **Survives a server restart.** Sessions reclaim their id and artifacts, and the auth token is reused, so background watcher URLs Claude was already given keep working.
+- Source split into `server.ts` / `client.ts` / `mcp.ts` / `shared.ts`; the test suite grew to 38 tests and runs against an isolated server.
+
+Tool names, schemas, and the `claude.send()` contract are unchanged.
+
 ## 0.8.0 — 2026-07-05
 
 - **Canvas composer**: a free-text input in the canvas shell — tell your agent something from the browser anytime, no artifact required. Notes arrive as a new `note` interaction kind, attributed to the user, and are skipped by artifact-filtered waits.

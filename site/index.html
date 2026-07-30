@@ -408,7 +408,8 @@
     </div>
     <dl class="ledger">
       <div class="row"><dt>canvas</dt><dd><b>Live in the browser.</b> Artifacts stream over SSE; new ones take focus, updates hot-reload in place, and the whole canvas survives a session restart.</dd></div>
-      <div class="row"><dt>webhook</dt><dd><b>Anything can POST in.</b> CI, scripts, curl — external events queue into the same loop your clicks use, gated by a per-session token.</dd></div>
+      <div class="row"><dt>sessions</dt><dd><b>One tab, every agent.</b> A single canvas server per machine: each session — any project, any client — gets its own row in the sidebar, its own artifacts, and its own answers.</dd></div>
+      <div class="row"><dt>webhook</dt><dd><b>Anything can POST in.</b> CI, scripts, curl — external events queue into the same loop your clicks use, gated by a localhost-only token.</dd></div>
       <div class="row"><dt>transport</dt><dd><b>Plain MCP over stdio.</b> No experimental channel APIs, no org-policy fights. If your agent speaks MCP, it speaks sidecar.</dd></div>
       <div class="row"><dt>security</dt><dd><b>Localhost-only, token-gated, sandboxed.</b> The server binds <code>127.0.0.1</code>; artifacts run in an opaque-origin iframe where <code>claude.send()</code> is the only way out.</dd></div>
       <div class="row"><dt>footprint</dt><dd><b>One process, one file.</b> A single Bun-powered bundle from npm: MCP on one side, HTTP on the other. Read the source in ten minutes.</dd></div>

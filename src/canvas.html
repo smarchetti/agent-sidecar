@@ -29,10 +29,11 @@
     font: 14px/1.5 var(--font-sans);
   }
   ::selection { background: var(--ember); color: var(--ember-ink); }
+  :focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
 
   #sidebar {
-    width: 248px; min-width: 248px;
-    display: flex; flex-direction: column;
+    width: 266px; min-width: 266px;
+    display: flex; flex-direction: column; min-height: 0;
     border-right: 1px solid var(--line);
     background: var(--ink-1);
   }
@@ -51,27 +52,94 @@
   }
   #status-dot.connected { background: var(--ok); box-shadow: 0 0 8px oklch(78% 0.14 155 / 0.5); }
 
-  #artifact-list { flex: 1; overflow-y: auto; padding: 8px; }
-  .artifact-item {
-    padding: 10px 12px;
-    border-radius: 9px;
-    cursor: pointer;
-    margin-bottom: 3px;
-    border: 1px solid transparent;
+  /* the two sidebar panes: which session, then what's in it */
+  .pane { display: flex; flex-direction: column; min-height: 0; }
+  #sessions-pane { max-height: 46%; border-bottom: 1px solid var(--line); }
+  #artifacts-pane { flex: 1; }
+  .pane-label {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 12px 16px 7px;
+    font: 600 10.5px/1 var(--font-mono);
+    text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--text-dim);
   }
-  .artifact-item:hover { background: var(--ink-2); }
-  .artifact-item.active {
+  .pane-label .crumb {
+    margin-left: auto;
+    text-transform: none; letter-spacing: 0;
+    font-weight: 400; font-size: 10.5px;
+    color: var(--ember); opacity: .85;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pane-body { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+
+  .row {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 1px solid transparent; border-radius: 9px;
+    color: inherit; font: inherit; cursor: pointer;
+    padding: 9px 11px; margin-bottom: 3px;
+  }
+  .row:hover { background: var(--ink-2); }
+  .row.active {
     background: oklch(74% 0.155 45 / 0.1);
     border-color: oklch(74% 0.155 45 / 0.4);
   }
+
+  .project-name {
+    padding: 9px 12px 4px;
+    font: 600 11px/1 var(--font-mono);
+    color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .session-item { display: flex; align-items: center; gap: 9px; }
+  .session-item .dot {
+    width: 7px; height: 7px; border-radius: 50%; flex: none;
+    background: var(--ok); box-shadow: 0 0 7px oklch(78% 0.14 155 / 0.45);
+  }
+  .session-item.ended .dot { background: var(--line); box-shadow: none; }
+  .session-item.ended .label { color: var(--text-dim); }
+  .session-item .label {
+    font: 500 12.5px var(--font-mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+  }
+  .session-item.active .label { color: var(--ember-hot); }
+  .session-item .count {
+    font: 400 10.5px var(--font-mono); color: var(--text-dim); flex: none;
+  }
+  .session-item .badge {
+    flex: none;
+    background: var(--ember); color: var(--ember-ink);
+    font: 600 10px/1 var(--font-mono);
+    padding: 3px 6px; border-radius: 999px;
+  }
+  .session-item .dismiss {
+    flex: none; background: none; border: 0; cursor: pointer;
+    color: var(--text-dim); font: 400 14px/1 var(--font-sans);
+    padding: 0 2px; border-radius: 4px;
+    opacity: 0; transition: opacity .15s;
+  }
+  .session-item:hover .dismiss, .session-item .dismiss:focus-visible { opacity: 1; }
+  .session-item .dismiss:hover { color: var(--ember-hot); }
+  @media (prefers-reduced-motion: reduce) { .session-item .dismiss { transition: none; } }
+
   .artifact-item .title {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     font-weight: 500; font-size: 13.5px;
   }
   .artifact-item.active .title { color: var(--ember-hot); }
-  .artifact-item .time { color: var(--text-dim); font-size: 11px; font-family: var(--font-mono); margin-top: 3px; }
+  .artifact-item .time {
+    color: var(--text-dim); font-size: 11px; font-family: var(--font-mono); margin-top: 3px;
+  }
 
-  #empty-note { color: var(--text-dim); padding: 26px 16px; text-align: center; font-size: 13px; }
+  .empty-note { color: var(--text-dim); padding: 22px 14px; text-align: center; font-size: 12.5px; }
+
+  #server-meta {
+    padding: 9px 16px;
+    border-top: 1px solid var(--line);
+    font: 400 10.5px/1.4 var(--font-mono);
+    color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #stage { flex: 1; display: flex; position: relative; min-height: 0; }
@@ -79,11 +147,11 @@
   #placeholder {
     flex: 1; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    color: var(--text-dim); gap: 10px;
+    color: var(--text-dim); gap: 10px; padding: 24px; text-align: center;
   }
   #placeholder .logo { font-size: 38px; color: var(--ember); opacity: .8; }
 
-  /* composer: talk to the agent from the browser, no artifact required */
+  /* composer: talk to the selected session from the browser, no artifact required */
   #composer {
     display: flex; gap: 10px; align-items: center;
     padding: 12px 14px;
@@ -99,6 +167,7 @@
   }
   #composer input:focus { border-color: var(--ember); }
   #composer input::placeholder { color: var(--text-dim); }
+  #composer input:disabled { opacity: .55; cursor: not-allowed; }
   #composer button {
     background: var(--ember); color: var(--ember-ink);
     border: 0; border-radius: 8px;
@@ -113,6 +182,7 @@
     bottom: 74px; left: 50%;
     transform: translateX(-50%) translateY(140px);
     background: var(--ember); color: var(--ember-ink);
+    border: 0;
     padding: 9px 18px;
     border-radius: 999px;
     font: 600 12.5px var(--font-mono);
@@ -122,6 +192,7 @@
     z-index: 10;
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.actionable { pointer-events: auto; cursor: pointer; }
   @media (prefers-reduced-motion: reduce) {
     #toast { transition: none; }
     #status-dot { transition: none; }
@@ -133,17 +204,31 @@
     <header>
       <span class="mark">✳</span>
       <span>agent-sidecar</span>
-      <span id="status-dot" title="connection to agent-sidecar"></span>
+      <span id="status-dot" title="connection to the sidecar server"></span>
     </header>
-    <div id="artifact-list">
-      <div id="empty-note">No artifacts yet.<br/>Ask your agent to show you something.</div>
+
+    <div class="pane" id="sessions-pane">
+      <div class="pane-label">sessions</div>
+      <div class="pane-body" id="session-list">
+        <div class="empty-note" id="sessions-empty">No agent sessions yet.</div>
+      </div>
     </div>
+
+    <div class="pane" id="artifacts-pane">
+      <div class="pane-label">artifacts <span class="crumb" id="session-crumb"></span></div>
+      <div class="pane-body" id="artifact-list">
+        <div class="empty-note" id="artifacts-empty">Ask your agent to show you something.</div>
+      </div>
+    </div>
+
+    <div id="server-meta"></div>
   </div>
+
   <div id="main">
     <div id="stage">
       <div id="placeholder">
         <div class="logo">✳</div>
-        <div>Artifacts your agent creates will appear here.</div>
+        <div id="placeholder-text">Artifacts your agent creates will appear here.</div>
       </div>
       <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
       <iframe id="viewer" style="display:none" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
@@ -153,71 +238,292 @@
       <button id="note-send">send</button>
     </div>
   </div>
-  <div id="toast">✓ Sent</div>
+
+  <button id="toast" type="button" aria-live="polite">✓ Sent</button>
 
 <script>
   const TOKEN = '__SIDECAR_TOKEN__' // injected by the server when this page is served
-  const list = document.getElementById('artifact-list')
-  const emptyNote = document.getElementById('empty-note')
-  const viewer = document.getElementById('viewer')
-  const placeholder = document.getElementById('placeholder')
-  const statusDot = document.getElementById('status-dot')
-  const toast = document.getElementById('toast')
-  const noteInput = document.getElementById('note-input')
-  const noteSend = document.getElementById('note-send')
 
-  let artifactsById = new Map()
-  let activeId = null
+  const el = id => document.getElementById(id)
+  const sessionList = el('session-list')
+  const sessionsEmpty = el('sessions-empty')
+  const artifactList = el('artifact-list')
+  const artifactsEmpty = el('artifacts-empty')
+  const crumb = el('session-crumb')
+  const viewer = el('viewer')
+  const placeholder = el('placeholder')
+  const placeholderText = el('placeholder-text')
+  const statusDot = el('status-dot')
+  const serverMeta = el('server-meta')
+  const toast = el('toast')
+  const noteInput = el('note-input')
+  const noteSend = el('note-send')
 
-  function fmtTime(ts) {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  /** id -> session summary ({ id, project, label, live, artifacts: [...] }) */
+  let sessions = new Map()
+  /** session id -> count of artifact events you haven't looked at */
+  const unseen = new Map()
+  let selectedSessionId = null
+  let activeArtifactId = null
+  let serverInfo = null
+  let toastAction = null
+
+  const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const session = id => sessions.get(id) || null
+  const sessionOfArtifact = artifactId => {
+    for (const s of sessions.values()) if (s.artifacts.some(a => a.id === artifactId)) return s
+    return null
+  }
+  const artifactsOf = id => (session(id)?.artifacts ?? []).slice().sort((a, b) => a.createdAt - b.createdAt)
+
+  function post(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
+      body: JSON.stringify(body),
+    })
   }
 
-  function showToast(text) {
-    toast.textContent = text || '✓ Sent'
+  function showToast(text, action) {
+    toast.textContent = text
+    toastAction = action || null
+    toast.classList.toggle('actionable', !!toastAction)
     toast.classList.add('show')
-    setTimeout(() => toast.classList.remove('show'), 1800)
+    clearTimeout(showToast.timer)
+    showToast.timer = setTimeout(() => toast.classList.remove('show'), toastAction ? 5000 : 1800)
   }
+  toast.addEventListener('click', () => {
+    if (!toastAction) return
+    const run = toastAction
+    toastAction = null
+    toast.classList.remove('show', 'actionable')
+    run()
+  })
 
-  function renderList() {
-    list.querySelectorAll('.artifact-item').forEach(el => el.remove())
-    const items = [...artifactsById.values()].sort((a, b) => b.createdAt - a.createdAt)
-    emptyNote.style.display = items.length ? 'none' : 'block'
-    for (const a of items) {
-      const el = document.createElement('div')
-      el.className = 'artifact-item' + (a.id === activeId ? ' active' : '')
-      el.innerHTML = '<div class="title"></div><div class="time"></div>'
-      el.querySelector('.title').textContent = a.title
-      el.querySelector('.time').textContent = fmtTime(a.createdAt)
-      el.onclick = () => select(a.id)
-      list.appendChild(el)
+  // --- rendering ------------------------------------------------------------
+
+  function renderSessions() {
+    sessionList.querySelectorAll('.project-group').forEach(n => n.remove())
+    const all = [...sessions.values()]
+    sessionsEmpty.style.display = all.length ? 'none' : 'block'
+
+    // group by project, newest session last within each group
+    const byProject = new Map()
+    for (const s of all.sort((a, b) => a.startedAt - b.startedAt)) {
+      if (!byProject.has(s.project)) byProject.set(s.project, [])
+      byProject.get(s.project).push(s)
+    }
+
+    for (const [project, rows] of [...byProject].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const group = document.createElement('div')
+      group.className = 'project-group'
+      const name = document.createElement('div')
+      name.className = 'project-name'
+      name.textContent = project
+      name.title = rows[0].cwd
+      group.appendChild(name)
+
+      for (const s of rows) {
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'row session-item' + (s.live ? '' : ' ended') + (s.id === selectedSessionId ? ' active' : '')
+        row.setAttribute('aria-pressed', String(s.id === selectedSessionId))
+        row.title = s.live ? `${s.id} · live` : `${s.id} · ended ${fmtTime(s.endedAt)}`
+
+        const dot = document.createElement('span')
+        dot.className = 'dot'
+        const label = document.createElement('span')
+        label.className = 'label'
+        label.textContent = s.label
+        row.append(dot, label)
+
+        const pendingCount = unseen.get(s.id) || 0
+        if (pendingCount && s.id !== selectedSessionId) {
+          const badge = document.createElement('span')
+          badge.className = 'badge'
+          badge.textContent = String(pendingCount)
+          row.appendChild(badge)
+        } else {
+          const count = document.createElement('span')
+          count.className = 'count'
+          count.textContent = s.artifacts.length || ''
+          row.appendChild(count)
+        }
+
+        if (!s.live) {
+          const dismiss = document.createElement('button')
+          dismiss.type = 'button'
+          dismiss.className = 'dismiss'
+          dismiss.textContent = '×'
+          dismiss.title = 'Remove this ended session from the canvas'
+          dismiss.setAttribute('aria-label', `Remove ended session ${s.label}`)
+          dismiss.addEventListener('click', ev => {
+            ev.stopPropagation()
+            fetch('/api/sessions/' + encodeURIComponent(s.id), {
+              method: 'DELETE',
+              headers: { 'X-Sidecar-Token': TOKEN },
+            })
+          })
+          row.appendChild(dismiss)
+        }
+
+        row.addEventListener('click', () => selectSession(s.id))
+        group.appendChild(row)
+      }
+      sessionList.appendChild(group)
     }
   }
 
-  function newestId() {
-    return [...artifactsById.values()].sort((a, b) => a.createdAt - b.createdAt).pop().id
+  function renderArtifacts() {
+    artifactList.querySelectorAll('.artifact-item').forEach(n => n.remove())
+    const items = artifactsOf(selectedSessionId).reverse() // newest first
+    const s = session(selectedSessionId)
+
+    crumb.textContent = s ? s.project + (s.live ? '' : ' · ended') : ''
+    artifactsEmpty.style.display = items.length ? 'none' : 'block'
+    artifactsEmpty.textContent = !s
+      ? 'No session selected.'
+      : 'Nothing in this session yet.'
+
+    for (const a of items) {
+      const row = document.createElement('button')
+      row.type = 'button'
+      row.className = 'row artifact-item' + (a.id === activeArtifactId ? ' active' : '')
+      row.setAttribute('aria-pressed', String(a.id === activeArtifactId))
+      const title = document.createElement('div')
+      title.className = 'title'
+      title.textContent = a.title
+      const time = document.createElement('div')
+      time.className = 'time'
+      time.textContent = fmtTime(a.createdAt)
+      row.append(title, time)
+      row.addEventListener('click', () => selectArtifact(a.id))
+      artifactList.appendChild(row)
+    }
   }
 
-  function select(id) {
-    const a = artifactsById.get(id)
-    if (!a) return
-    activeId = id
+  function renderComposer() {
+    const s = session(selectedSessionId)
+    const canSend = !!s && s.live
+    noteInput.disabled = !canSend
+    noteSend.disabled = !canSend
+    noteInput.placeholder = !s
+      ? 'No session to talk to yet…'
+      : s.live
+        ? `Tell ${s.label} something…`
+        : 'This session has ended'
+  }
+
+  function renderMeta() {
+    if (!serverInfo) return
+    const live = [...sessions.values()].filter(s => s.live).length
+    serverMeta.textContent = `127.0.0.1:${serverInfo.port} · ${live}/${sessions.size} live`
+    serverMeta.title =
+      `agent-sidecar server ${serverInfo.version}, pid ${serverInfo.pid}, ` +
+      `started ${serverInfo.startedAt}`
+  }
+
+  function render() {
+    renderSessions()
+    renderArtifacts()
+    renderComposer()
+    renderMeta()
+  }
+
+  // --- selection ------------------------------------------------------------
+
+  function showPlaceholder(text) {
+    activeArtifactId = null
+    viewer.style.display = 'none'
+    viewer.src = 'about:blank'
+    placeholderText.textContent = text
+    placeholder.style.display = 'flex'
+  }
+
+  function selectSession(id, opts = {}) {
+    if (!session(id)) return
+    const changed = selectedSessionId !== id
+    selectedSessionId = id
+    unseen.delete(id)
+    if (changed || opts.force) {
+      // tell the server where notes and unaddressed webhooks should land
+      post('/api/canvas/active', { sessionId: id }).catch(() => {})
+    }
+    const items = artifactsOf(id)
+    const wanted = opts.artifactId && items.some(a => a.id === opts.artifactId) ? opts.artifactId : null
+    if (wanted) selectArtifact(wanted)
+    else if (items.length) selectArtifact(items[items.length - 1].id)
+    else {
+      showPlaceholder('Artifacts your agent creates will appear here.')
+      render()
+    }
+  }
+
+  function selectArtifact(id) {
+    const owner = sessionOfArtifact(id)
+    if (!owner) return
+    if (owner.id !== selectedSessionId) return selectSession(owner.id, { artifactId: id })
+    const a = owner.artifacts.find(x => x.id === id)
+    activeArtifactId = id
     location.hash = id
     placeholder.style.display = 'none'
     viewer.style.display = 'block'
     viewer.src = '/artifact/' + encodeURIComponent(id) + '?v=' + a.updatedAt
-    renderList()
+    render()
   }
 
-  function showEmptyViewer() {
-    activeId = null
-    viewer.style.display = 'none'
-    viewer.src = 'about:blank'
-    placeholder.style.display = 'flex'
-    renderList()
+  /** Newest live session, else newest session overall. */
+  function bestSession() {
+    const all = [...sessions.values()].sort((a, b) => b.startedAt - a.startedAt)
+    return all.find(s => s.live) || all[0] || null
   }
+
+  // --- server stream --------------------------------------------------------
 
   let firstSnapshot = true
+
+  function applySnapshot(msg) {
+    sessions = new Map(msg.sessions.map(s => [s.id, s]))
+    serverInfo = msg.server
+    for (const id of [...unseen.keys()]) if (!sessions.has(id)) unseen.delete(id)
+
+    // honor a deep-link hash on first load only
+    const wantedArtifact = firstSnapshot ? location.hash.slice(1) : ''
+    firstSnapshot = false
+    const deepLinked = wantedArtifact ? sessionOfArtifact(wantedArtifact) : null
+
+    if (deepLinked) selectSession(deepLinked.id, { artifactId: wantedArtifact, force: true })
+    else if (session(selectedSessionId)) selectSession(selectedSessionId, { artifactId: activeArtifactId, force: true })
+    else {
+      const best = bestSession()
+      if (best) selectSession(best.id, { force: true })
+      else {
+        showPlaceholder('Artifacts your agent creates will appear here.')
+        render()
+      }
+    }
+  }
+
+  function onArtifactCreated(msg) {
+    const s = session(msg.sessionId)
+    if (!s) return
+    s.artifacts = s.artifacts.filter(a => a.id !== msg.artifact.id).concat(msg.artifact)
+
+    const showing = session(selectedSessionId)
+    if (msg.sessionId === selectedSessionId) {
+      selectArtifact(msg.artifact.id) // within the session you're watching, newest wins
+      return
+    }
+    if (!showing || !showing.live) {
+      // you're not mid-anything: follow the agent that's actually working
+      selectSession(msg.sessionId, { artifactId: msg.artifact.id })
+      return
+    }
+    // badge instead of yanking the view out from under an interaction elsewhere
+    unseen.set(msg.sessionId, (unseen.get(msg.sessionId) || 0) + 1)
+    render()
+    showToast(`✳ ${s.project} · ${s.label}`, () => selectSession(s.id, { artifactId: msg.artifact.id }))
+  }
 
   function connect() {
     const es = new EventSource('/events')
@@ -225,43 +531,63 @@
     es.onerror = () => statusDot.classList.remove('connected')
     es.onmessage = ev => {
       const msg = JSON.parse(ev.data)
+
       if (msg.type === 'snapshot') {
-        artifactsById = new Map(msg.artifacts.map(a => [a.id, a]))
-        // honor a deep-link hash on initial load only; on reconnect snapshots,
-        // jump to the newest artifact so focus events missed offline aren't lost
-        const wanted = firstSnapshot ? location.hash.slice(1) : ''
-        firstSnapshot = false
-        if (wanted && artifactsById.has(wanted)) select(wanted)
-        else if (artifactsById.size) select(newestId())
-        else showEmptyViewer()
+        applySnapshot(msg)
+      } else if (msg.type === 'session') {
+        const known = session(msg.session.id)
+        sessions.set(msg.session.id, msg.session)
+        if (!session(selectedSessionId)) selectSession(msg.session.id, { force: true })
+        else render()
+        if (!known && msg.session.live) unseen.delete(msg.session.id)
+      } else if (msg.type === 'session_removed') {
+        sessions.delete(msg.id)
+        unseen.delete(msg.id)
+        if (selectedSessionId === msg.id) {
+          selectedSessionId = null
+          const best = bestSession()
+          if (best) selectSession(best.id, { force: true })
+          else { showPlaceholder('Artifacts your agent creates will appear here.'); render() }
+        } else render()
       } else if (msg.type === 'created') {
-        artifactsById.set(msg.artifact.id, msg.artifact)
-        select(msg.artifact.id) // new artifact takes focus
+        onArtifactCreated(msg)
       } else if (msg.type === 'updated') {
-        artifactsById.set(msg.artifact.id, msg.artifact)
-        if (msg.artifact.id === activeId) select(msg.artifact.id) // reload iframe
-        else renderList()
+        const s = session(msg.sessionId)
+        if (!s) return
+        s.artifacts = s.artifacts.map(a => (a.id === msg.artifact.id ? msg.artifact : a))
+        if (msg.artifact.id === activeArtifactId) selectArtifact(msg.artifact.id) // reload iframe
+        else {
+          if (msg.sessionId !== selectedSessionId) {
+            unseen.set(msg.sessionId, (unseen.get(msg.sessionId) || 0) + 1)
+          }
+          render()
+        }
       } else if (msg.type === 'removed') {
-        artifactsById.delete(msg.artifact.id)
-        if (msg.artifact.id === activeId) {
-          artifactsById.size ? select(newestId()) : showEmptyViewer()
-        } else renderList()
+        const s = session(msg.sessionId)
+        if (!s) return
+        s.artifacts = s.artifacts.filter(a => a.id !== msg.artifact.id)
+        if (msg.artifact.id === activeArtifactId) {
+          const rest = artifactsOf(selectedSessionId)
+          if (rest.length) selectArtifact(rest[rest.length - 1].id)
+          else { showPlaceholder('Artifacts your agent creates will appear here.'); render() }
+        } else render()
       }
     }
   }
   connect()
 
   // Send bridge: the sandboxed artifact iframe can't reach the server directly,
-  // so claude.send() posts here and we forward it with the session token.
+  // so claude.send() posts here and we forward it with the server token.
   window.addEventListener('message', async ev => {
     const d = ev.data
     if (!d || d.type !== 'sidecar:send' || ev.source !== viewer.contentWindow) return
     let ok = false
     try {
-      const res = await fetch('/api/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
-        body: JSON.stringify({ artifactId: d.artifactId, payload: d.payload }),
+      const owner = sessionOfArtifact(d.artifactId)
+      const res = await post('/api/webhook', {
+        artifactId: d.artifactId,
+        sessionId: owner ? owner.id : selectedSessionId,
+        payload: d.payload,
       })
       ok = res.ok
     } catch {}
@@ -269,20 +595,17 @@
     if (ok) showToast('✓ Sent')
   })
 
-  // Composer: free-text notes to the agent, no artifact required
+  // Composer: free-text notes to the selected session, no artifact required
   async function sendNote() {
     const note = noteInput.value.trim()
-    if (!note) return
+    const s = session(selectedSessionId)
+    if (!note || !s || !s.live) return
     noteSend.disabled = true
     try {
-      const res = await fetch('/api/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Sidecar-Token': TOKEN },
-        body: JSON.stringify({ kind: 'note', note }),
-      })
+      const res = await post('/api/webhook', { kind: 'note', note, sessionId: s.id })
       if (res.ok) {
         noteInput.value = ''
-        showToast('✓ Note sent')
+        showToast(`✓ Note sent to ${s.label}`)
       }
     } catch {}
     noteSend.disabled = false

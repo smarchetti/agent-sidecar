@@ -10,7 +10,7 @@
 
 > *"Show me three layout options for the settings screen"* → three clickable mockups appear on the canvas → you click one → Claude continues with your choice.
 
-agent-sidecar is an MCP server with an embedded web server, packaged as a Claude Code plugin — and usable from [any MCP client](#use-with-other-agents). It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-agent return path is a long-poll the server turns into ordinary tool output.
+agent-sidecar is an MCP server plus a local canvas server, packaged as a Claude Code plugin — and usable from [any MCP client](#use-with-other-agents). One canvas server runs per machine and every agent session attaches to it, so all your sessions share one browser tab and you switch between them in the sidebar. It needs no push mechanism (works on orgs where Claude Code channels are blocked): the browser-to-agent return path is a long-poll the server turns into ordinary tool output.
 
 **Website & full docs → [agent-sidecar.vercel.app](https://agent-sidecar.vercel.app/)** ([documentation](https://agent-sidecar.vercel.app/docs.html))
 
@@ -45,48 +45,66 @@ Everything transfers: the tools, the canvas, the token auth, the `.sidecar/` fil
 
 ## How it works
 
-One process, two faces:
+One canvas server, any number of agent sessions:
 
 ```
-Claude Code  ⇄ MCP/stdio ⇄  agent-sidecar  ⇄ HTTP 127.0.0.1 ⇄  browser canvas
-                              │
-                              └── POST /api/webhook  ←  CI, scripts, anything
+Claude Code (project A) ⇄ MCP/stdio ⇄ ┐
+Claude Code (project B) ⇄ MCP/stdio ⇄ ┤→ agent-sidecar server ⇄ HTTP 127.0.0.1:8765 ⇄ browser canvas
+Cursor      (project A) ⇄ MCP/stdio ⇄ ┘   (one detached process)   │
+                                                                  └── POST /api/webhook ← CI, scripts, anything
 ```
 
-1. **Claude shows** — `create_artifact` puts a complete HTML document on the canvas (SSE-live; new artifacts take focus, updates hot-reload).
-2. **You click** — every artifact gets a `claude.send(payload)` helper injected. It crosses a postMessage bridge out of the sandboxed iframe; the canvas shell forwards it to the webhook with the session token.
+1. **Claude shows** — `create_artifact` puts a complete HTML document on the canvas (SSE-live; updates hot-reload). Artifacts belong to the session that made them.
+2. **You click** — every artifact gets a `claude.send(payload)` helper injected. It crosses a postMessage bridge out of the sandboxed iframe; the canvas shell forwards it to the webhook with the server token.
 3. **Claude continues** — either a blocking `await_interaction` call returns your payload in-turn (quick decisions), or a background `curl /api/wait` watcher re-invokes Claude when you click (long waits, Claude keeps working meanwhile).
 
-Every interaction is also appended to `.sidecar/interactions.jsonl` — a durable, `tail -f`-able audit log.
+Interactions are routed back to the session that owns the artifact you clicked, so parallel sessions never read each other's answers. Each session's interactions are appended to its own project's `.sidecar/interactions.jsonl` — a durable, `tail -f`-able audit log.
+
+## Sessions on the canvas
+
+The sidebar lists every attached session, grouped by project and labelled with its git branch; picking one shows its artifacts. A session that ends stays on the canvas (dimmed) so you can still read what it produced, until you dismiss it. When an artifact arrives in a session you're *not* looking at, that session gets a badge and a clickable toast — the view never jumps out from under an interaction you're in the middle of.
+
+The server outlives your agent sessions, and exits on its own after 30 minutes with no sessions and no open canvas tab. To manage it directly:
+
+```bash
+bunx agent-sidecar --status   # server, sessions, artifact counts
+bunx agent-sidecar --stop     # shut it down
+bunx agent-sidecar --serve    # run it in the foreground (debugging)
+```
 
 ## Reference (short version)
 
 **MCP tools** — `create_artifact`, `update_artifact`, `await_interaction` (blocking, `artifact_id` filter), `get_interactions` (drain), `list_artifacts`, `remove_artifact`.
 
-**HTTP** — `GET /` canvas · `GET /events` SSE · `GET /artifact/:id` · `POST /api/webhook` (token) · `GET /api/wait` long-poll (token) · `GET /health`.
+**HTTP** — `GET /` canvas · `GET /events` SSE · `GET /artifact/:id` · `POST /api/webhook` (token) · `GET /api/wait?session=…` long-poll (token) · `GET /health`.
 
-**Sessions** — each agent session runs its own agent-sidecar: port `8765` preferred, ephemeral fallback if taken. Coordinates (port, URL, auth token) live in `.sidecar/session.json`, which is how external systems push events in:
+**Files** — machine-wide state in `~/.agent-sidecar/` (`server.json` coordinates, `state.json` canvas contents, `server.log`); per-project state in `.sidecar/` (`session.json` coordinates for external callers, `interactions.jsonl`). Env: `SIDECAR_PORT` (default 8765), `SIDECAR_HOME`, `SIDECAR_IDLE_EXIT_MS`.
+
+External systems push events in by reading the coordinates from either file:
 
 ```bash
 url=$(jq -r .url .sidecar/session.json); token=$(jq -r .token .sidecar/session.json)
-curl -X POST -H "X-Sidecar-Token: $token" -d "build failed on main" "$url/api/webhook"
+sid=$(jq -r .sessionId .sidecar/session.json)   # omit to land on the session you're viewing
+curl -X POST -H "X-Sidecar-Token: $token" -d "build failed on main" "$url/api/webhook?session=$sid"
 ```
 
 Full parameter tables, artifact-authoring patterns, and the security model are in the **[docs](https://agent-sidecar.vercel.app/docs.html)**.
 
 ## Security in one paragraph
 
-Localhost-only binding; a random per-session token required on `/api/webhook` and `/api/wait` (defeats cross-site POSTs from web pages at localhost); artifacts run in an opaque-origin sandboxed iframe with no access to the token, the canvas shell, storage, or same-origin network — `claude.send()` is their only output channel. Don't tunnel or port-forward the server: anything that reaches the webhook is eventually placed in front of Claude. [Details.](https://agent-sidecar.vercel.app/docs.html#security)
+Localhost-only binding; a random token (stored `0600` in `~/.agent-sidecar/server.json`) required on every `/api/*` endpoint (defeats cross-site POSTs from web pages at localhost); artifacts run in an opaque-origin sandboxed iframe with no access to the token, the canvas shell, storage, or same-origin network — `claude.send()` is their only output channel. Don't tunnel or port-forward the server: anything that reaches the webhook is eventually placed in front of Claude. [Details.](https://agent-sidecar.vercel.app/docs.html#security)
 
 ## Development
 
 ```bash
 bun install
-bun test                              # 24 end-to-end tests over real MCP stdio
+bun test                              # 38 end-to-end tests over real MCP stdio
 claude --mcp-config dev.mcp.json      # run your working copy live (disable the plugin first)
 ```
 
-Source is `src/sidecar.ts` (the whole server) and `src/canvas.html` (the browser shell, inlined into the bundle). Releases: bump `package.json`, the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, and CHANGELOG, then push and tag `vX.Y.Z` — GitHub Actions tests, publishes to npm with provenance, and cuts the release.
+Tests run against an isolated server (`SIDECAR_HOME` + a random port), so they never touch the one you're using.
+
+Source: `src/sidecar.ts` (CLI entry) · `src/server.ts` (the singleton canvas server) · `src/client.ts` (server discovery + session link) · `src/mcp.ts` (the tools) · `src/shared.ts` (paths and types) · `src/canvas.html` (the browser shell, inlined into the bundle). Releases: bump `package.json`, the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, and CHANGELOG, then push and tag `vX.Y.Z` — GitHub Actions tests, publishes to npm with provenance, and cuts the release.
 
 ## License
 
