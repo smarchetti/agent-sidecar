@@ -153,6 +153,14 @@ describe('http surface', () => {
     expect(canvas).toContain(session.token)
     expect(canvas).toContain('sandbox="allow-scripts')
   })
+
+  test('canvas status bar carries the real version, not the placeholder', async () => {
+    const canvas = await (await fetch(base)).text()
+    const { version } = (await (await fetch(`${base}/health`)).json()) as { version: string }
+    expect(canvas).not.toContain('__SIDECAR_VERSION__')
+    expect(canvas).toContain(`v${version}`)
+    expect(canvas).toContain('id="statusbar"')
+  })
 })
 
 describe('artifact lifecycle', () => {
@@ -372,12 +380,16 @@ describe('canvas notes', () => {
     expect(text(drained)).toContain('a stray thought')
   })
 
-  test('canvas shell ships the composer and the session pane', async () => {
+  test('canvas shell ships the composer and the project/session artifact tree', async () => {
     const canvas = await (await fetch(base)).text()
     expect(canvas).toContain('note-input')
     expect(canvas).toContain("kind: 'note'")
     expect(canvas).toContain('session-list')
     expect(canvas).toContain('/api/canvas/active')
+    // artifacts are nested under their session, which is nested under its project
+    expect(canvas).toContain('function groupByProject')
+    expect(canvas).toContain('function renderSession')
+    expect(canvas).toContain('function renderArtifacts')
   })
 })
 

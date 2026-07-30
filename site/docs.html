@@ -224,7 +224,7 @@
     <p class="lede">Everything about agent-sidecar: how the canvas works, the MCP tools your agent calls, the HTTP API underneath, and how to write artifacts that talk back.</p>
 
     <div class="pill-row">
-      <span class="pill">version <b>0.9.0</b></span>
+      <span class="pill">version <b>0.10.0</b></span>
       <span class="pill">requires <b>Bun ≥ 1.2</b></span>
       <span class="pill">license <b>MIT</b></span>
       <span class="pill"><b>localhost</b> only</span>
@@ -235,7 +235,7 @@
     <pre><code><span class="c"># in any Claude Code session</span>
 <span class="g">›</span> /plugin marketplace add smarchetti/agent-sidecar
 <span class="g">›</span> /plugin install agent-sidecar@agent-sidecar</code></pre>
-    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.9.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
+    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.10.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
     <p>Verify with <code>/mcp</code>: you should see <b>agent-sidecar</b> listed as connected.</p>
 
     <h2 id="other-agents">Other agents</h2>
@@ -254,7 +254,7 @@
       <li>The helper injected into artifacts is named <code>claude.send()</code> regardless of which agent is driving.</li>
       <li>The <a href="#receiving">background-watcher pattern</a> needs an agent that can run shell commands in the background and surface their output. The blocking <code>await_interaction</code> tool works in every client.</li>
     </ul>
-    <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.9.0"]</code>.</div>
+    <div class="callout"><b>Pin the version</b> outside Claude Code too if you want reproducible behavior: <code>"args": ["agent-sidecar@0.10.0"]</code>.</div>
 
     <h2 id="first-artifact">Your first artifact</h2>
     <p>You don't call agent-sidecar directly — your agent does. Ask for something visual:</p>
@@ -293,7 +293,7 @@
     <div class="callout"><b>Why artifact_id matters:</b> both consumers accept an artifact filter. Passing it means a stale click on some older artifact can't be mistaken for the answer to the current question — non-matching interactions stay queued.</div>
 
     <h2 id="sessions">Sessions &amp; files</h2>
-    <p>Every agent session — in any project, from any MCP client — appears as its own session on one canvas. The sidebar groups them by project and labels each with its git branch; picking one shows that session's artifacts. Artifacts and interaction queues are per session, so parallel sessions never read each other's answers.</p>
+    <p>Every agent session — in any project, from any MCP client — appears as its own session on one canvas. The sidebar is a tree — project, then session (labelled with its git branch), then that session's artifacts nested beneath it — so the whole canvas is visible at once and any artifact is one click away; collapse a session you don't need. Artifacts and interaction queues are per session, so parallel sessions never read each other's answers.</p>
     <p>A session that ends stays on the canvas, dimmed, so you can still read what it produced — dismiss it with the <code>×</code> on its row. When an artifact arrives in a session you aren't looking at, that session is badged and a clickable toast appears; the view never jumps out from under an interaction you're in the middle of.</p>
     <p>The server prefers port <code>8765</code> (override with <code>SIDECAR_PORT</code>) and scans upward if a foreign process holds it. It outlives your agent sessions and exits by itself after 30 minutes with no sessions and no canvas tab (<code>SIDECAR_IDLE_EXIT_MS</code>, <code>0</code> disables). Manage it directly:</p>
     <pre><code>bunx agent-sidecar --status   <span class="c"># server, sessions, artifact counts</span>

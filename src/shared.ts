@@ -5,7 +5,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const VERSION = '0.9.0'
+export const VERSION = '0.10.0'
 
 /**
  * Machine-wide state dir. The server is a singleton across every project, so

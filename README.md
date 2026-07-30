@@ -62,7 +62,7 @@ Interactions are routed back to the session that owns the artifact you clicked, 
 
 ## Sessions on the canvas
 
-The sidebar lists every attached session, grouped by project and labelled with its git branch; picking one shows its artifacts. A session that ends stays on the canvas (dimmed) so you can still read what it produced, until you dismiss it. When an artifact arrives in a session you're *not* looking at, that session gets a badge and a clickable toast — the view never jumps out from under an interaction you're in the middle of.
+The sidebar is a tree: **project → session → artifacts**. Each session is labelled with its git branch and lists its own artifacts nested beneath it, so you can see everything on the canvas at once and jump straight to any artifact — collapse a session with its ▾ to get it out of the way. A status bar along the bottom reports the connection, the server address, live/total sessions, artifact and queued-reply counts, and the running version. A session that ends stays on the canvas (dimmed) so you can still read what it produced, until you dismiss it. When an artifact arrives in a session you're *not* looking at, that session gets a badge and a clickable toast — the view never jumps out from under an interaction you're in the middle of.
 
 The server outlives your agent sessions, and exits on its own after 30 minutes with no sessions and no open canvas tab. To manage it directly:
 

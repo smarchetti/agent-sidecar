@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 — 2026-07-30
+
+**The canvas sidebar is a project → session → artifact tree, and the shell has a status bar.**
+
+- **Artifacts are grouped in a tree**: project → session → artifacts. Every session lists its own artifacts nested beneath it (collapsible), so the whole canvas is visible at once instead of one session's worth at a time. Live sessions start expanded; ended ones start collapsed and stay collapsed once you close them.
+- **Status bar** across the bottom of the canvas: connection state, server address, live/total sessions, artifact count, queued replies waiting for the agent, and the running version.
+- **Canvas shell refreshed**: a top bar naming the artifact you're viewing with its `project / session · updated` breadcrumb plus reload and open-in-new-tab actions, the artifact framed as a lit panel, and clearer selection/hover states in the sidebar.
+
 ## 0.9.0 — 2026-07-28
 
 **One canvas server per machine, sessions separated in the UI.** Previously every agent session started its own server on its own port, which meant a browser tab per session and a canvas that died with the session.

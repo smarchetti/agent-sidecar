@@ -901,7 +901,10 @@ export async function runServer(): Promise<void> {
   httpServer = await bindPort()
   PORT = httpServer.port! // always set: we only ever bind TCP, never a unix socket
   BASE_URL = `http://127.0.0.1:${PORT}`
-  canvasHtml = canvasTemplate.replace('__SIDECAR_TOKEN__', TOKEN)
+  // version is injected too, so the status bar reads right before the SSE snapshot lands
+  canvasHtml = canvasTemplate
+    .replace('__SIDECAR_TOKEN__', TOKEN)
+    .replaceAll('__SIDECAR_VERSION__', VERSION)
 
   const info = {
     server: 'agent-sidecar' as const,
