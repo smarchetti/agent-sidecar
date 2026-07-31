@@ -50,6 +50,24 @@ Both pages use the **identical** sticky topnav: `✳ agent-sidecar` brand · Doc
 - Motion: entrance choreography only in the hero diorama; elsewhere restraint (color transitions ≤200ms, ease-out). Everything honors `prefers-reduced-motion`.
 - z-index scale: `--z-nav: 10` (only layer in use; extend semantically if needed).
 
+## Canvas shell (`src/canvas.html`)
+
+The shipped canvas UI shares the site's ember accent but uses system fonts (it must work offline), its own geometry tokens, and — unlike the site — **both a dark and a light theme**. Rules keeping it coherent:
+
+- **Every colour is a semantic token**, named for its job (`--bg`, `--panel`, `--raised`, `--line`, `--text`, `--text-dim`, `--text-faint`, `--accent`, `--accent-ink`, `--accent-wash`, `--ok`, `--danger`) and defined once per theme. No rule may hardcode a colour — a test fails the build if one does, because a literal silently belongs to one theme.
+- **Light is not dark inverted.** The accent drops from `oklch(74% …)` to `oklch(50% …)` so it stays legible as text on a light surface, and `--accent-ink` flips light because the accent doubles as a button background.
+- **Never dim text with `opacity`.** It reads as a shortcut but multiplies against the surface and quietly breaks contrast; use `--text-faint`, which is a real colour that passes AA in both themes. Opacity is for genuinely inert things: disabled controls, separator glyphs.
+- Theme resolution: `data-theme` on `<html>` pins a choice (persisted), and with no choice `prefers-color-scheme` decides. The saved value is applied by an inline script in `<head>` — applying it later flashes the wrong theme.
+- Both themes are verified with a WCAG contrast pass over every text role; AA is the floor.
+
+- **One type scale, four sans steps** (`--t-xs` 11 / `--t-sm` 12 / `--t-md` 13 / `--t-lg` 15). Mono sits one step below the sans beside it so the two optically match.
+- **Mono is a meaning, not a texture.** It marks machine identifiers only — repo, worktree, branch, `host:port`, version, artifact paths. Counts, tags, hints, relative times, and status text are sans. (The sidebar once set counts and labels in mono; it read as decoration and made the column noisy.)
+- **Spacing is a 4px rhythm** (`--s-1`…`--s-5`). No ad hoc paddings — values like `3px 8px 5px` are what made the tree feel unresolved.
+- **Prefer space to rules.** Repo groups separate with `--s-5`, not a hairline; the tree keeps exactly one guide line (the artifact list) and the status bar separates counters with `·`.
+- **Times are relative** (`now`, `3m`, `2h` in the sidebar; `3m ago` where there's room), refreshed on a 30s tick, with the absolute time on hover. A canvas you watch while an agent works should not make you subtract clock times.
+- **Radius by nesting depth, three steps only.** `--r-sm: 6px` for inner controls and nested rows (artifact rows, disclosure twists, dismiss buttons), `--r-md: 8px` for the rows and controls that contain them (session/worktree rows, buttons, inputs), `--r-lg: 12px` for the stage frame — the one large surface. `--r-pill` is for status objects (badge, toast), never layout. Full-bleed bars — headers, pane labels, composer, status bar — stay square; a bar that spans the window has no corners to round.
+- **Bar heights are shared tokens.** `--header-h` drives *both* the sidebar header and the stage top bar so their bottom hairlines form one continuous line across the app; `--statusbar-h` does the same for the footer (and the toast offset keys off it). Never set either height inline.
+
 ## Accessibility
 
 WCAG AA. `--text-dim` is the floor for body text on ink surfaces — don't go dimmer. Copy buttons have `aria-label`s; the diorama has a `role="img"` narrative label; keyboard focus follows document order.

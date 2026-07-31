@@ -3,9 +3,9 @@
  * (one detached process per machine) and the per-session MCP client.
  */
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
-export const VERSION = '0.10.0'
+export const VERSION = '0.11.0'
 
 /**
  * Machine-wide state dir. The server is a singleton across every project, so
@@ -36,6 +36,41 @@ export interface ServerInfo {
   /** Set when the server exited cleanly. The file is kept (rather than deleted)
    *  so the next server reuses the token and old watcher URLs stay valid. */
   stoppedAt?: string
+}
+
+/**
+ * Where a session is working, as the canvas groups it: repo → worktree → session.
+ *
+ * Two checkouts of one repo (a main worktree plus `git worktree add` siblings) share
+ * a `repoKey`, so they nest under one repo instead of looking like unrelated projects.
+ * A cwd that isn't a repo at all still gets a group of its own, named after the
+ * directory — `repoKind` is what the UI uses to label it differently.
+ */
+export interface SessionOrigin {
+  /** Stable identity of the repo: its main worktree's root path (the cwd when not a repo). */
+  repoKey: string
+  /** Display name for the repo level — from the origin remote when there is one. */
+  repo: string
+  repoKind: 'git' | 'dir'
+  /** origin remote URL, when the checkout has one. */
+  remote?: string
+  /** The checkout this session sits in — directory name of its own worktree root. */
+  worktree: string
+  /** False only for a linked worktree; the canvas shows the worktree level when a repo has more than one. */
+  worktreeIsMain: boolean
+}
+
+/** Fallback origin for a plain directory: its own group, no nesting. */
+export function originFromCwd(cwd: string): SessionOrigin {
+  const name = basename(cwd) || cwd
+  return { repoKey: cwd, repo: name, repoKind: 'dir', worktree: name, worktreeIsMain: true }
+}
+
+/** `git@github.com:owner/name.git` / `https://host/owner/name` → `name`. */
+export function repoNameFromRemote(remote: string): string | undefined {
+  const cleaned = remote.trim().replace(/\.git$/, '').replace(/\/+$/, '')
+  const last = cleaned.split(/[/:]/).pop()
+  return last || undefined
 }
 
 export interface ArtifactSummary {

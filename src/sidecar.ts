@@ -17,10 +17,18 @@ import { SIDECAR_HOME, VERSION, isServerAlive, readServerInfo } from './shared.t
 interface SessionRow {
   id: string
   project: string
+  origin?: { repo: string; worktree: string; worktreeIsMain: boolean }
   label: string
   live: boolean
   queued: number
   artifacts: unknown[]
+}
+
+/** `repo · branch`, with the worktree spelled out when it isn't the main checkout. */
+function where(s: SessionRow): string {
+  const o = s.origin
+  if (!o) return s.project
+  return o.worktreeIsMain ? o.repo : `${o.repo}/${o.worktree}`
 }
 
 function ago(iso: string): string {
@@ -49,7 +57,7 @@ async function status(): Promise<string> {
     for (const s of sessions) {
       const queued = s.queued ? `, ${s.queued} queued` : ''
       lines.push(
-        `  ${s.live ? '●' : '○'} ${s.id}  ${s.project} · ${s.label}  ` +
+        `  ${s.live ? '●' : '○'} ${s.id}  ${where(s)} · ${s.label}  ` +
           `(${s.artifacts.length} artifact(s)${queued})`,
       )
     }

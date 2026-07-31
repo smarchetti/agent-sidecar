@@ -62,7 +62,15 @@ Interactions are routed back to the session that owns the artifact you clicked, 
 
 ## Sessions on the canvas
 
-The sidebar is a tree: **project → session → artifacts**. Each session is labelled with its git branch and lists its own artifacts nested beneath it, so you can see everything on the canvas at once and jump straight to any artifact — collapse a session with its ▾ to get it out of the way. A status bar along the bottom reports the connection, the server address, live/total sessions, artifact and queued-reply counts, and the running version. A session that ends stays on the canvas (dimmed) so you can still read what it produced, until you dismiss it. When an artifact arrives in a session you're *not* looking at, that session gets a badge and a clickable toast — the view never jumps out from under an interaction you're in the middle of.
+The sidebar is a tree: **repo → worktree → session → artifacts**. Each session is labelled with its git branch and lists its own artifacts nested beneath it, so you can see everything on the canvas at once and jump straight to any artifact — collapse any level with its ▾ to get it out of the way.
+
+Grouping follows your actual checkouts, not directory names. Two `git worktree` checkouts of one repo nest under a single repo (identified by the main worktree's git dir, and named from the `origin` remote when there is one), so parallel work on the same project reads as one thing instead of unrelated projects. The worktree level only appears when a repo has more than one checkout — a plain single-checkout repo stays flat. A session in a directory that isn't a repo at all still gets its own group, marked `dir`.
+
+**Light and dark.** The canvas follows your system theme; the sun/moon control in the top bar pins whichever you prefer, and it's remembered per browser. Artifacts themselves stay light in both — an artifact is the agent's own document, not part of the shell.
+
+**Two view modes**, toggled in the top bar or with `t`: **single** shows one artifact filling the stage, **timeline** stacks every artifact of the session in one scroll — oldest first, numbered, each in its own card — for reviewing a whole session's worth of work at once. Cards size themselves to their content (each artifact reports its own height, since the canvas can't measure a sandboxed frame), clamped so a one-liner still reads as a card and a very long artifact scrolls inside its own. Buttons work in every card, not just the focused one, and each card's answers are attributed to that card. The choice is remembered per browser.
+
+A status bar along the bottom reports the connection, the server address, live/total sessions, artifact and queued-reply counts, and the running version. A session that ends stays on the canvas (dimmed) so you can still read what it produced, until you dismiss it. When an artifact arrives in a session you're *not* looking at, that session gets a badge and a clickable toast — the view never jumps out from under an interaction you're in the middle of.
 
 The server outlives your agent sessions, and exits on its own after 30 minutes with no sessions and no open canvas tab. To manage it directly:
 

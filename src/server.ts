@@ -26,9 +26,11 @@ import {
   STATE_FILE,
   VERSION,
   isServerAlive,
+  originFromCwd,
   readServerInfo,
   type ArtifactSummary,
   type Interaction,
+  type SessionOrigin,
 } from './shared.ts'
 // inlined by `bun build`, so dist/sidecar.js is fully self-contained
 // (bun-types mistypes `with { type: 'text' }` imports as HTMLBundle; it's a string at runtime)
@@ -60,6 +62,8 @@ interface Session {
   id: string
   cwd: string
   project: string
+  /** Repo + worktree this session works in — the two levels above it in the canvas tree. */
+  origin: SessionOrigin
   /** Git branch when we can read one, else "session" — what the UI labels it with. */
   label: string
   pid: number | null
@@ -88,6 +92,7 @@ function sessionSummary(s: Session) {
     id: s.id,
     cwd: s.cwd,
     project: s.project,
+    origin: s.origin,
     label: s.label,
     // endedAt is the durable fact; attachments only disambiguate overlapping reconnects
     live: s.endedAt === null,
@@ -121,6 +126,8 @@ async function loadState() {
       id: s.id,
       cwd: s.cwd,
       project: s.project ?? basename(s.cwd ?? ''),
+      // state written by an older server has no origin: derive one from the cwd
+      origin: s.origin ?? originFromCwd(s.cwd ?? ''),
       label: s.label ?? 'session',
       pid: s.pid ?? null,
       startedAt: s.startedAt ?? now,
@@ -166,6 +173,7 @@ async function persistState() {
         id: s.id,
         cwd: s.cwd,
         project: s.project,
+        origin: s.origin,
         label: s.label,
         pid: s.pid,
         startedAt: s.startedAt,
@@ -213,11 +221,16 @@ function registerSession(input: {
   cwd: string
   label?: string
   pid?: number
+  origin?: SessionOrigin
 }): Session {
+  // a caller that doesn't know its repo (external POST, older client) still groups
+  // sensibly: its own directory becomes its group
+  const origin = input.origin ?? originFromCwd(input.cwd)
   const existing = input.resume ? sessions.get(input.resume) : undefined
   if (existing) {
     // a client reconnecting across a server restart keeps its id and its canvas
     existing.cwd = input.cwd || existing.cwd
+    existing.origin = input.origin ?? existing.origin
     existing.label = input.label || existing.label
     existing.pid = input.pid ?? existing.pid
     existing.lastSeenAt = Date.now()
@@ -231,6 +244,7 @@ function registerSession(input: {
     id,
     cwd: input.cwd,
     project: basename(input.cwd) || input.cwd,
+    origin,
     label: input.label || 'session',
     pid: input.pid ?? null,
     startedAt: now,
@@ -246,6 +260,26 @@ function registerSession(input: {
   sessions.set(id, session)
   schedulePersist()
   return session
+}
+
+/**
+ * Validates an origin off the wire. Anything malformed is dropped rather than
+ * half-trusted, so the tree can never be grouped by a partial identity.
+ */
+function parseOrigin(raw: unknown): SessionOrigin | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  if (typeof o.repoKey !== 'string' || !o.repoKey) return undefined
+  if (typeof o.repo !== 'string' || !o.repo) return undefined
+  if (typeof o.worktree !== 'string' || !o.worktree) return undefined
+  return {
+    repoKey: o.repoKey,
+    repo: o.repo,
+    repoKind: o.repoKind === 'git' ? 'git' : 'dir',
+    remote: typeof o.remote === 'string' && o.remote ? o.remote : undefined,
+    worktree: o.worktree,
+    worktreeIsMain: o.worktreeIsMain !== false,
+  }
 }
 
 function markAttached(s: Session, handle: object) {
@@ -327,6 +361,9 @@ function createArtifact(s: Session, title: string, html: string): Artifact {
  * Helper script injected into every artifact iframe. The iframe is sandboxed
  * (opaque origin, no direct fetch to the server), so sends go over postMessage
  * to the canvas shell, which holds the token and forwards to /api/webhook.
+ *
+ * It also reports its own content height: the shell can't measure a cross-origin
+ * iframe, so timeline cards size themselves from these messages.
  */
 function helperScript(artifactId: string): string {
   return `<script>
@@ -336,6 +373,45 @@ function helperScript(artifactId: string): string {
     var d = ev.data
     if (d && d.type === 'sidecar:sent' && sends[d.id]) { sends[d.id](!!d.ok); delete sends[d.id] }
   })
+
+  var lastHeight = 0, pending = null
+  /**
+   * Content height, measured from the body's own box plus its margins.
+   * scrollHeight is no good on its own: it never reports less than the frame's
+   * viewport, so a short artifact could never shrink its card back down.
+   */
+  function measure() {
+    var doc = document.documentElement, body = document.body
+    if (body) {
+      var cs = getComputedStyle(body)
+      var margins = (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0)
+      var box = Math.ceil(body.getBoundingClientRect().height + margins)
+      // a body pinned to the viewport (height:100%) measures the frame, not the
+      // content — fall through to scrollHeight, which at least never clips
+      if (box > 0 && Math.abs(box - window.innerHeight) > 2) return box
+    }
+    return Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0)
+  }
+  function report() {
+    pending = null
+    var h = measure()
+    // ignore jitter: a card that resizes on every subpixel change flickers
+    if (!h || Math.abs(h - lastHeight) < 8) return
+    lastHeight = h
+    parent.postMessage({ type: 'sidecar:height', artifactId: ${JSON.stringify(artifactId)}, height: h }, '*')
+  }
+  function schedule() { if (!pending) pending = setTimeout(report, 60) }
+  if (document.readyState === 'complete') schedule()
+  window.addEventListener('load', schedule)
+  // fonts and late layout land after load; a couple of follow-ups settle it
+  setTimeout(schedule, 250)
+  setTimeout(schedule, 900)
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(schedule)
+    if (document.documentElement) ro.observe(document.documentElement)
+    document.addEventListener('DOMContentLoaded', function () { if (document.body) ro.observe(document.body) })
+  }
+
   window.claude = {
     send: function (payload) {
       var json = JSON.stringify(payload === undefined ? null : payload)
@@ -600,6 +676,7 @@ async function handle(req: Request): Promise<Response> {
       cwd,
       label: typeof body.label === 'string' ? body.label : undefined,
       pid: typeof body.pid === 'number' ? body.pid : undefined,
+      origin: parseOrigin(body.origin),
     })
     broadcast({ type: 'session', session: sessionSummary(session) })
     return Response.json({ sessionId: session.id, url: BASE_URL, version: VERSION })

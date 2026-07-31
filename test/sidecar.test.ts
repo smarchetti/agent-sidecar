@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -154,6 +154,33 @@ describe('http surface', () => {
     expect(canvas).toContain('sandbox="allow-scripts')
   })
 
+  test('canvas ships both view modes, with the timeline builder', async () => {
+    const canvas = await (await fetch(base)).text()
+    expect(canvas).toContain('id="mode-switch"')
+    expect(canvas).toContain('data-mode="timeline"')
+    expect(canvas).toContain('function renderTimeline')
+    expect(canvas).toContain("localStorage.setItem('sidecar:viewMode'")
+    // a card must answer for its own artifact, never for one the message names
+    expect(canvas).toContain('function artifactOfSource')
+  })
+
+  test('canvas ships both themes and applies a saved one before first paint', async () => {
+    const canvas = await (await fetch(base)).text()
+    expect(canvas).toContain('[data-theme="light"]')
+    expect(canvas).toContain('prefers-color-scheme: light')
+    expect(canvas).toContain("localStorage.setItem('sidecar:theme'")
+    // the pre-paint script has to sit in <head>, above the stylesheet's consumers
+    expect(canvas.indexOf("localStorage.getItem('sidecar:theme')")).toBeLessThan(
+      canvas.indexOf('<body>'),
+    )
+    // colours are all tokens, so a rule never hardcodes one theme's value
+    const styles = canvas.slice(canvas.indexOf('<style>'), canvas.indexOf('</style>'))
+    const literals = styles
+      .split('\n')
+      .filter(l => /oklch\(|#[0-9a-f]{3,6}\b/i.test(l) && !l.includes('--'))
+    expect(literals).toEqual([])
+  })
+
   test('canvas status bar carries the real version, not the placeholder', async () => {
     const canvas = await (await fetch(base)).text()
     const { version } = (await (await fetch(`${base}/health`)).json()) as { version: string }
@@ -185,6 +212,15 @@ describe('artifact lifecycle', () => {
     expect(html).toContain('window.claude')
     expect(html).toContain('sidecar:send')
     expect(html.indexOf('window.claude')).toBeGreaterThan(html.indexOf('<head>'))
+  })
+
+  test('the helper reports its own height, so timeline cards can size themselves', async () => {
+    const html = await (await fetch(`${base}/artifact/${id}`)).text()
+    expect(html).toContain('sidecar:height')
+    // measuring the body box is what lets a short artifact shrink its card;
+    // scrollHeight alone never reports less than the frame's own viewport
+    expect(html).toContain('getBoundingClientRect')
+    expect(html).toContain('ResizeObserver')
   })
 
   test('update_artifact replaces html (helper prepended when no <head>)', async () => {
@@ -386,8 +422,8 @@ describe('canvas notes', () => {
     expect(canvas).toContain("kind: 'note'")
     expect(canvas).toContain('session-list')
     expect(canvas).toContain('/api/canvas/active')
-    // artifacts are nested under their session, which is nested under its project
-    expect(canvas).toContain('function groupByProject')
+    // artifacts are nested under their session, which is nested under its repo
+    expect(canvas).toContain('function buildTree')
     expect(canvas).toContain('function renderSession')
     expect(canvas).toContain('function renderArtifacts')
   })
@@ -552,6 +588,116 @@ describe('server restart', () => {
     expect(revived.port).toBe(Number(PORT))
     expect(revived.token).toBe(session.token)
     expect((await health()).pid).not.toBe(oldPid)
+  })
+})
+
+/**
+ * Two checkouts of one repo have to land under one repo in the canvas tree — that's
+ * the whole point of keying on the main worktree's git dir rather than the cwd name.
+ */
+describe('repo and worktree grouping', () => {
+  const ROOT = mkdtempSync(join(tmpdir(), 'sidecar-git-'))
+  const MAIN = join(ROOT, 'widgets-main')
+  const LINKED = join(ROOT, 'widgets-feat-tree')
+  let mainSession: SessionFile
+  let linkedSession: SessionFile
+  let mainClient: Client
+  let linkedClient: Client
+
+  beforeAll(async () => {
+    const git = (cwd: string, args: string[]) =>
+      Bun.spawn(['git', ...args], { cwd, stdout: 'ignore', stderr: 'ignore' }).exited
+
+    mkdirSync(MAIN, { recursive: true })
+    await git(MAIN, ['init', '-q', '-b', 'main'])
+    await Bun.write(join(MAIN, 'readme.md'), '# widgets\n')
+    await git(MAIN, ['add', '-A'])
+    await git(MAIN, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'])
+    // the display name comes from the remote, not the directory (which is "widgets-main")
+    await git(MAIN, ['remote', 'add', 'origin', 'git@github.com:acme/widgets.git'])
+    await git(MAIN, ['worktree', 'add', '-q', '-b', 'feat/tree', LINKED])
+
+    const a = makeClient(MAIN)
+    mainClient = a.client
+    await a.connected
+    mainSession = await readSessionFile(MAIN)
+
+    const b = makeClient(LINKED)
+    linkedClient = b.client
+    await b.connected
+    linkedSession = await readSessionFile(LINKED)
+  })
+
+  afterAll(async () => {
+    await mainClient?.close().catch(() => {})
+    await linkedClient?.close().catch(() => {})
+  })
+
+  interface Origin {
+    repoKey: string
+    repo: string
+    repoKind: string
+    remote?: string
+    worktree: string
+    worktreeIsMain: boolean
+  }
+
+  async function origins(): Promise<Record<string, Origin>> {
+    const res = await fetch(`${base}/api/sessions`, {
+      headers: { 'X-Sidecar-Token': session.token },
+    })
+    const { sessions } = (await res.json()) as { sessions: { id: string; origin: Origin }[] }
+    return Object.fromEntries(sessions.map(s => [s.id, s.origin]))
+  }
+
+  test('both checkouts report the same repo identity, named from the remote', async () => {
+    const all = await origins()
+    const main = all[mainSession.sessionId]!
+    const linked = all[linkedSession.sessionId]!
+
+    expect(main.repoKey).toBe(linked.repoKey) // one repo, so one group in the tree
+    expect(main.repoKey).toContain('widgets-main') // keyed on the MAIN worktree
+    expect(main.repo).toBe('widgets') // remote name wins over the directory name
+    expect(linked.repo).toBe('widgets')
+    expect(main.repoKind).toBe('git')
+    expect(main.remote).toBe('git@github.com:acme/widgets.git')
+  })
+
+  test('the linked worktree is distinguished from the main checkout', async () => {
+    const all = await origins()
+    const main = all[mainSession.sessionId]!
+    const linked = all[linkedSession.sessionId]!
+
+    expect(main.worktree).toBe('widgets-main')
+    expect(main.worktreeIsMain).toBe(true)
+    expect(linked.worktree).toBe('widgets-feat-tree')
+    expect(linked.worktreeIsMain).toBe(false)
+  })
+
+  test('a session outside a repo still gets its own group, marked as a directory', async () => {
+    const all = await origins()
+    const plain = all[session.sessionId]!
+    expect(plain.repoKind).toBe('dir')
+    // the agent process reports its resolved cwd (/var → /private/var on macOS)
+    expect(plain.repoKey).toBe(realpathSync(PROJECT_A))
+    expect(plain.repo).toBe(PROJECT_A.split('/').pop()!)
+    expect(plain.worktreeIsMain).toBe(true)
+  })
+
+  test('the canvas builds the tree from repo, worktree, then session', async () => {
+    const canvas = await (await fetch(base)).text()
+    expect(canvas).toContain('function buildTree')
+    expect(canvas).toContain('function renderWorktree')
+    // grouping keys on the repo, and the worktree level is conditional on there
+    // being more than one checkout
+    expect(canvas).toContain('repos.get(o.repoKey)')
+    expect(canvas).toContain('repo.list.length < 2')
+  })
+
+  test('--status names the worktree when it is not the main checkout', async () => {
+    const out = await cli('--status')
+    expect(out).toContain('widgets/widgets-feat-tree · feat/tree')
+    expect(out).toContain('widgets · main')
   })
 })
 

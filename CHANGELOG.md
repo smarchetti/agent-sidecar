@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0 — 2026-07-31
+
+**Grouped by repo and worktree, a timeline view of each session, and light/dark themes.**
+
+- **Grouped by repo and worktree.** The sidebar tree is now repo → worktree → session → artifacts. Sessions in two `git worktree` checkouts of the same repo group under one repo instead of appearing as unrelated projects: identity comes from the main worktree's git dir (`--git-common-dir`), and the display name from the `origin` remote when there is one. The worktree level is shown only when a repo has more than one checkout, so single-checkout repos stay exactly as flat as before. A cwd that isn't a repo still gets its own group, marked `dir`.
+- Session breadcrumbs, canvas notes, toasts, and `--status` name the worktree when it isn't the repo's main checkout (`brain/bra-72-evidence · feat/x`).
+- **Timeline mode.** A `single` / `timeline` switch in the top bar (or `t`) — timeline stacks every artifact of the selected session in one scroll instead of showing one per screen, oldest first, numbered, each card with its own title, time, and open-in-new-tab. Cards auto-size: the injected helper now reports its content height over `postMessage` (a sandboxed frame can't be measured from outside), clamped to 180–760px. Interactions work from any card and are attributed by the frame they came from, not by what the message claims. The mode persists per browser.
+- The status bar counts repos alongside sessions.
+- **Light and dark themes.** The canvas follows your system by default and a sun/moon control in the top bar pins a choice, remembered per browser and applied before first paint. Every colour became a semantic token defined once per theme; a test now fails if any rule hardcodes one. Text dimming that used `opacity` became a real `--text-faint` colour — the old approach quietly failed contrast. Both themes pass WCAG AA on every text role.
+- **Single mode is edge to edge.** The artifact fills the stage with no padded, bordered, rounded frame of our own around it; cards belong to the timeline, which needs them because it stacks many.
+- The view switch is a pair of icons instead of the words `single` / `timeline`.
+- **Typography and spacing systematized.** One sans type scale (11/12/13/15) replaced five ad hoc sizes, and mono is now reserved for machine identifiers — repo, worktree, branch, `host:port`, version — instead of also setting counts, tags, and status text. Spacing follows a 4px rhythm. Timestamps are relative (`now`, `3m`, `2h` in the sidebar; `3m ago` where there's room) and refresh themselves, with the absolute time on hover. Fewer hairlines: repo groups separate by space, the status bar by `·`. Both empty states now explain what the canvas is for rather than showing a glyph and a sentence.
+- **Geometry cleaned up.** Corner radii were six different values picked ad hoc (4/5/7/8/9/12px); they're now a three-step scale applied by nesting depth (`--r-sm`/`--r-md`/`--r-lg`, plus pills for status), with full-bleed bars left square. The sidebar header and the stage top bar were 51px and 58.5px tall, so their hairlines missed each other — both now use one `--header-h` token and line up. Documented in DESIGN.md.
+- Sessions report a `origin` object (`repoKey`, `repo`, `repoKind`, `remote`, `worktree`, `worktreeIsMain`) on `GET /api/sessions` and in the canvas snapshot; callers that don't send one are grouped by their directory as before.
+
 ## 0.10.0 — 2026-07-30
 
 **The canvas sidebar is a project → session → artifact tree, and the shell has a status bar.**

@@ -7,13 +7,16 @@
  */
 import { mkdir } from 'node:fs/promises'
 import { openSync } from 'node:fs'
-import { basename } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import {
   SERVER_LOG,
   SIDECAR_HOME,
   isServerAlive,
+  originFromCwd,
   readServerInfo,
+  repoNameFromRemote,
   type ServerInfo,
+  type SessionOrigin,
 } from './shared.ts'
 
 const SPAWN_TIMEOUT_MS = 10_000
@@ -58,20 +61,54 @@ export async function ensureServer(entry: string): Promise<ServerInfo> {
   )
 }
 
+/** Runs git in `cwd`, returning trimmed stdout — or null for any failure. */
+async function git(cwd: string, args: string[]): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'pipe', stderr: 'ignore' })
+    const out = (await new Response(proc.stdout).text()).trim()
+    return (await proc.exited) === 0 && out ? out : null
+  } catch {
+    return null // git isn't installed
+  }
+}
+
 /** Best-effort branch name, used as the session's label in the canvas. */
 async function gitLabel(cwd: string): Promise<string | undefined> {
-  try {
-    const proc = Bun.spawn(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd,
-      stdout: 'pipe',
-      stderr: 'ignore',
-    })
-    const out = (await new Response(proc.stdout).text()).trim()
-    if ((await proc.exited) === 0 && out && out !== 'HEAD') return out
-  } catch {
-    // not a repo, or no git — the server falls back to "session"
+  // fails in a repo with no commits yet — the server falls back to "session"
+  const out = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return out && out !== 'HEAD' ? out : undefined
+}
+
+/**
+ * Which repo and which checkout of it this session is in.
+ *
+ * `--git-common-dir` points at the *main* worktree's git dir from anywhere in the
+ * repo, which is what makes two worktrees group together. It comes back relative
+ * to cwd in a main worktree and absolute in a linked one, so it always needs
+ * resolving before use.
+ */
+async function gitOrigin(cwd: string): Promise<SessionOrigin> {
+  const out = await git(cwd, ['rev-parse', '--show-toplevel', '--git-common-dir'])
+  const [toplevel, commonDir] = (out ?? '').split('\n')
+  if (!toplevel || !commonDir) return originFromCwd(cwd) // not a repo, or no git
+
+  const resolved = resolve(cwd, commonDir)
+  // …/main-repo/.git → …/main-repo; a bare repo (…/repo.git) is already the root
+  const mainRoot = basename(resolved) === '.git' ? dirname(resolved) : resolved
+  const remote = (await git(cwd, ['config', '--get', 'remote.origin.url'])) ?? undefined
+  const repo =
+    (remote ? repoNameFromRemote(remote) : undefined) ??
+    basename(mainRoot).replace(/\.git$/, '') ??
+    mainRoot
+
+  return {
+    repoKey: mainRoot,
+    repo: repo || mainRoot,
+    repoKind: 'git',
+    remote,
+    worktree: basename(toplevel) || toplevel,
+    worktreeIsMain: toplevel === mainRoot,
   }
-  return undefined
 }
 
 export interface WaitResult {
@@ -97,21 +134,31 @@ export class SessionLink {
   sessionId = ''
   readonly cwd: string
   readonly project: string
+  readonly origin: SessionOrigin
   private label: string | undefined
   private closed = false
   private readonly entry: string
 
-  private constructor(info: ServerInfo, entry: string, cwd: string, label?: string) {
+  private constructor(
+    info: ServerInfo,
+    entry: string,
+    cwd: string,
+    origin: SessionOrigin,
+    label?: string,
+  ) {
     this.info = info
     this.entry = entry
     this.cwd = cwd
-    this.project = basename(cwd) || cwd
+    this.origin = origin
+    // what the agent's own instruction text calls this session's home
+    this.project = origin.worktree
     this.label = label
   }
 
   static async open(entry: string, cwd = process.cwd()): Promise<SessionLink> {
     const info = await ensureServer(entry)
-    const link = new SessionLink(info, entry, cwd, await gitLabel(cwd))
+    const [origin, label] = await Promise.all([gitOrigin(cwd), gitLabel(cwd)])
+    const link = new SessionLink(info, entry, cwd, origin, label)
     await link.register()
     void link.attachLoop()
     return link
@@ -134,6 +181,7 @@ export class SessionLink {
         cwd: this.cwd,
         label: this.label,
         pid: process.pid,
+        origin: this.origin,
       }),
     })
     if (!res.ok) throw new Error(`could not register session: ${res.status} ${await res.text()}`)

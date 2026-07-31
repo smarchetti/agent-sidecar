@@ -5,22 +5,131 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>agent-sidecar</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13' fill='%23ff9e64'%3E✳%3C/text%3E%3C/svg%3E" />
+<script>
+  // Runs before first paint: a saved theme that disagrees with the system would
+  // otherwise flash the wrong one for as long as the rest of the page takes.
+  try {
+    var saved = localStorage.getItem('sidecar:theme')
+    if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved
+  } catch (e) {
+    // storage blocked — the CSS media query picks a side on its own
+  }
+</script>
 <style>
-  :root {
-    --ink-0: oklch(15.5% 0.012 55);
-    --ink-1: oklch(19% 0.014 55);
-    --ink-2: oklch(24% 0.018 55);
+  /**
+   * Two themes, one set of names. Every colour below is semantic (what it is for,
+   * not what it looks like) so a rule never needs to know which theme is on.
+   * Dark is the default; `data-theme` on <html> pins a choice, and with no choice
+   * the system preference wins (see the light block and the toggle in the script).
+   */
+  :root, [data-theme="dark"] {
+    color-scheme: dark;
+    --bg: oklch(15.5% 0.012 55);
+    --panel: oklch(19% 0.014 55);
+    --raised: oklch(24% 0.018 55);
     --line: oklch(31% 0.02 55);
     --line-soft: oklch(26% 0.018 55);
     --text: oklch(93% 0.012 65);
     --text-dim: oklch(76% 0.022 60);
-    --ember: oklch(74% 0.155 45);
-    --ember-hot: oklch(81% 0.16 55);
-    --ember-ink: oklch(22% 0.05 45);
+    --text-faint: oklch(66% 0.022 58);
+    --accent: oklch(74% 0.155 45);
+    --accent-hot: oklch(81% 0.16 55);
+    --accent-ink: oklch(22% 0.05 45);
+    /* accent at low alpha: selected rows and their edges */
+    --accent-wash: oklch(74% 0.155 45 / 0.11);
+    --accent-wash-soft: oklch(74% 0.155 45 / 0.09);
+    --accent-edge: oklch(74% 0.155 45 / 0.38);
+    --accent-glow: oklch(74% 0.155 45 / 0.4);
+    --selected: oklch(24% 0.018 55 / 0.55);
     --ok: oklch(78% 0.14 155);
+    --ok-glow: oklch(78% 0.14 155 / 0.45);
+    --danger: oklch(58% 0.18 25);
+    --shadow-card: 0 1px 2px oklch(0% 0 0 / 0.4);
     --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
     --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    /* Radius scale — three steps, applied by nesting depth: inner controls and
+       nested rows are r-sm, the rows and controls that hold them r-md, and only
+       the stage (the one large surface) r-lg. Pills are for status, never layout. */
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-pill: 999px;
+    /* Spacing rhythm. Every padding and gap is a multiple of 4 — ad hoc values
+       are what made the sidebar feel unresolved. */
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    /* Type scale. Four sans steps, and mono one step down from the sans it sits
+       beside so the two optically match. Mono is reserved for machine identifiers
+       — repo, worktree, branch, host:port, version — never for counts or labels. */
+    --t-xs: 11px;
+    --t-sm: 12px;
+    --t-md: 13px;
+    --t-lg: 15px;
+    /* Full-bleed bars stay square; these two must match so their hairlines line up. */
+    --header-h: 56px;
     --statusbar-h: 27px;
+    /* An artifact is its own document and stays light in both themes: it is the
+       page the agent wrote, not part of our chrome. */
+    --artifact-bg: #fff;
+  }
+
+  /**
+   * Light theme. Not the dark values inverted: the accent has to drop to ~50%
+   * lightness to stay legible as text on a light surface, and it doubles as a
+   * button background, so --accent-ink goes light in turn.
+   */
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg: oklch(98.6% 0.005 75);
+    --panel: oklch(96.4% 0.007 72);
+    --raised: oklch(92.6% 0.011 70);
+    --line: oklch(86% 0.014 68);
+    --line-soft: oklch(90.5% 0.011 70);
+    --text: oklch(25% 0.02 55);
+    --text-dim: oklch(43% 0.026 55);
+    --text-faint: oklch(52% 0.026 55);
+    --accent: oklch(50% 0.17 41);
+    --accent-hot: oklch(43% 0.17 39);
+    --accent-ink: oklch(99% 0.008 75);
+    --accent-wash: oklch(50% 0.17 41 / 0.10);
+    --accent-wash-soft: oklch(50% 0.17 41 / 0.07);
+    --accent-edge: oklch(50% 0.17 41 / 0.42);
+    --accent-glow: oklch(50% 0.17 41 / 0.28);
+    --selected: oklch(50% 0.17 41 / 0.06);
+    --ok: oklch(52% 0.14 155);
+    --ok-glow: oklch(52% 0.14 155 / 0.3);
+    --danger: oklch(52% 0.2 25);
+    --shadow-card: 0 1px 2px oklch(30% 0.02 55 / 0.10);
+  }
+
+  /* No explicit choice yet: follow the system. */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme]) {
+      color-scheme: light;
+      --bg: oklch(98.6% 0.005 75);
+      --panel: oklch(96.4% 0.007 72);
+      --raised: oklch(92.6% 0.011 70);
+      --line: oklch(86% 0.014 68);
+      --line-soft: oklch(90.5% 0.011 70);
+      --text: oklch(25% 0.02 55);
+      --text-dim: oklch(43% 0.026 55);
+      --text-faint: oklch(52% 0.026 55);
+      --accent: oklch(50% 0.17 41);
+      --accent-hot: oklch(43% 0.17 39);
+      --accent-ink: oklch(99% 0.008 75);
+      --accent-wash: oklch(50% 0.17 41 / 0.10);
+      --accent-wash-soft: oklch(50% 0.17 41 / 0.07);
+      --accent-edge: oklch(50% 0.17 41 / 0.42);
+      --accent-glow: oklch(50% 0.17 41 / 0.28);
+      --selected: oklch(50% 0.17 41 / 0.06);
+      --ok: oklch(52% 0.14 155);
+      --ok-glow: oklch(52% 0.14 155 / 0.3);
+      --danger: oklch(52% 0.2 25);
+      --shadow-card: 0 1px 2px oklch(30% 0.02 55 / 0.10);
+    }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -28,74 +137,97 @@
     display: grid;
     grid-template-columns: 282px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) var(--statusbar-h);
-    background: var(--ink-0);
+    background: var(--bg);
     color: var(--text);
     font: 14px/1.5 var(--font-sans);
   }
-  ::selection { background: var(--ember); color: var(--ember-ink); }
-  :focus-visible { outline: 2px solid var(--ember); outline-offset: 1px; }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
   /* ---------------------------------------------------------------- sidebar */
 
   #sidebar {
     display: flex; flex-direction: column; min-height: 0;
     border-right: 1px solid var(--line);
-    background: var(--ink-1);
+    background: var(--panel);
   }
   #sidebar header {
-    display: flex; align-items: center; gap: 9px;
-    padding: 15px 16px 14px;
+    display: flex; align-items: center; gap: var(--s-2);
+    flex: none; height: var(--header-h); padding: 0 var(--s-4);
     border-bottom: 1px solid var(--line);
-    font-weight: 600; letter-spacing: -0.01em;
+    font: 600 var(--t-lg)/1 var(--font-sans); letter-spacing: -0.01em;
   }
-  #sidebar header .mark { color: var(--ember); font-size: 16px; line-height: 1; }
+  #sidebar header .mark { color: var(--accent); font-size: 16px; line-height: 1; }
 
   .pane { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .pane-label {
-    display: flex; align-items: baseline; gap: 8px;
-    padding: 14px 16px 8px;
-    font: 600 10.5px/1 var(--font-mono);
-    text-transform: uppercase; letter-spacing: 0.09em;
+    display: flex; align-items: baseline; gap: var(--s-2);
+    padding: var(--s-4) var(--s-4) var(--s-2);
+    font: 600 var(--t-xs)/1 var(--font-sans);
+    text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-dim);
   }
-  .pane-label .hint {
-    margin-left: auto;
-    text-transform: none; letter-spacing: 0;
-    font-weight: 400; color: var(--text-dim); opacity: .7;
-  }
-  .pane-body { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  .pane-body { flex: 1; overflow-y: auto; padding: 0 var(--s-2) var(--s-3); }
+  /* scrollbars follow the theme instead of punching a light strip into the dark */
+  .pane-body, #timeline { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 
-  /* one group per project: the outermost level of the artifact tree */
-  .project + .project {
-    margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid var(--line-soft);
+  /* the outermost level: one group per repo (or per plain directory).
+     Separation is space, not a rule — the tree already has enough lines. */
+  .repo + .repo { margin-top: var(--s-5); }
+  .repo-head {
+    display: flex; align-items: baseline; gap: var(--s-2);
+    padding: 0 var(--s-2) var(--s-1);
   }
-  .project-head {
-    display: flex; align-items: baseline; gap: 8px;
-    padding: 3px 8px 5px;
-  }
-  .project-name {
-    font: 600 11px/1.3 var(--font-mono);
+  .repo-name {
+    font: 600 var(--t-sm)/1.3 var(--font-mono);
     color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .project-count {
+  .repo-count {
     margin-left: auto; flex: none;
-    font: 400 10px/1 var(--font-mono); color: var(--text-dim);
+    font: 400 var(--t-xs)/1 var(--font-sans); color: var(--text-faint);
   }
 
+  /* the worktree level, shown only when a repo has more than one checkout */
+  .worktree-row {
+    display: flex; align-items: center; gap: 2px;
+    border-radius: var(--r-md); padding-right: var(--s-2);
+  }
+  .worktree-row:hover { background: var(--raised); }
+  .worktree-main {
+    flex: 1; min-width: 0;
+    display: flex; align-items: baseline; gap: var(--s-2);
+    background: none; border: 0; cursor: default;
+    color: inherit; font: inherit; text-align: left;
+    padding: var(--s-1) var(--s-1) var(--s-1) 0;
+  }
+  .worktree-main .name {
+    font: 500 var(--t-sm) var(--font-mono); color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .worktree-main .tag {
+    flex: none;
+    font: 400 var(--t-xs)/1 var(--font-sans);
+    color: var(--text-faint);
+  }
+  .worktree-row .count {
+    flex: none; font: 400 var(--t-xs)/1 var(--font-sans); color: var(--text-faint);
+  }
+  /* sessions of a worktree sit one level in — indent alone, no second guide line */
+  .wt-sessions { margin: 0 0 var(--s-1) var(--s-3); }
+
   /* a session inside a project, with its artifacts nested beneath it */
-  .session { border-radius: 9px; }
-  .session.selected { background: oklch(24% 0.018 55 / 0.55); }
+  .session { border-radius: var(--r-md); }
+  .session.selected { background: var(--selected); }
   .session-row {
     display: flex; align-items: center; gap: 2px;
-    border-radius: 9px; border: 1px solid transparent;
+    border-radius: var(--r-md); border: 1px solid transparent;
     padding-right: 6px;
   }
-  .session-row:hover { background: var(--ink-2); }
+  .session-row:hover { background: var(--raised); }
   .session.selected > .session-row {
-    background: oklch(74% 0.155 45 / 0.11);
-    border-color: oklch(74% 0.155 45 / 0.38);
+    background: var(--accent-wash);
+    border-color: var(--accent-edge);
   }
 
   .twist {
@@ -103,7 +235,7 @@
     background: none; border: 0; cursor: pointer;
     color: var(--text-dim); font: 400 13px/1 var(--font-sans);
     display: grid; place-items: center;
-    border-radius: 5px;
+    border-radius: var(--r-sm);
   }
   .twist span { display: block; transition: transform .15s ease; }
   .twist[aria-expanded="false"] span { transform: rotate(-90deg); }
@@ -113,190 +245,275 @@
 
   .session-main {
     flex: 1; min-width: 0;
-    display: flex; align-items: center; gap: 9px;
+    display: flex; align-items: center; gap: var(--s-2);
     background: none; border: 0; cursor: pointer;
     color: inherit; font: inherit; text-align: left;
-    padding: 8px 4px 8px 0;
+    padding: var(--s-2) var(--s-1) var(--s-2) 0;
   }
   .session-main .dot {
     width: 7px; height: 7px; border-radius: 50%; flex: none;
-    background: var(--ok); box-shadow: 0 0 7px oklch(78% 0.14 155 / 0.45);
+    background: var(--ok); box-shadow: 0 0 7px var(--ok-glow);
   }
   .session.ended .dot { background: var(--line); box-shadow: none; }
   .session.ended .label { color: var(--text-dim); }
   .session-main .label {
-    font: 500 12.5px var(--font-mono);
+    font: 500 var(--t-sm) var(--font-mono);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex: 1; min-width: 0;
   }
-  .session.selected .label { color: var(--ember-hot); }
+  .session.selected .label { color: var(--accent-hot); }
   .session-main .count {
-    font: 400 10.5px var(--font-mono); color: var(--text-dim); flex: none;
+    font: 400 var(--t-xs) var(--font-sans); color: var(--text-faint); flex: none;
   }
   .session-row .badge {
     flex: none;
-    background: var(--ember); color: var(--ember-ink);
-    font: 600 10px/1 var(--font-mono);
-    padding: 3px 6px; border-radius: 999px;
+    background: var(--accent); color: var(--accent-ink);
+    font: 600 var(--t-xs)/1 var(--font-sans);
+    padding: 3px var(--s-1) 3px var(--s-1); border-radius: var(--r-pill);
   }
   .session-row .dismiss {
     flex: none; background: none; border: 0; cursor: pointer;
     color: var(--text-dim); font: 400 14px/1 var(--font-sans);
-    padding: 2px 3px; border-radius: 4px;
+    padding: 2px 3px; border-radius: var(--r-sm);
     opacity: 0; transition: opacity .15s;
   }
   .session-row:hover .dismiss, .session-row .dismiss:focus-visible { opacity: 1; }
-  .session-row .dismiss:hover { color: var(--ember-hot); }
+  .session-row .dismiss:hover { color: var(--accent-hot); }
 
-  /* the nested artifact list — a guide line ties each artifact to its session */
+  /* the nested artifact list — one guide line, the only rule left in the tree */
   .artifacts {
-    margin: 1px 0 6px 21px;
-    padding-left: 9px;
-    border-left: 1px solid var(--line);
-    display: flex; flex-direction: column; gap: 1px;
+    margin: 0 0 var(--s-1) var(--s-5);
+    padding-left: var(--s-2);
+    border-left: 1px solid var(--line-soft);
+    display: flex; flex-direction: column;
   }
   .artifact-item {
-    display: block; width: 100%; text-align: left;
-    background: none; border: 0; border-radius: 7px;
+    display: flex; align-items: baseline; gap: var(--s-2);
+    width: 100%; text-align: left;
+    background: none; border: 0; border-radius: var(--r-sm);
     color: inherit; font: inherit; cursor: pointer;
-    padding: 6px 9px;
+    padding: var(--s-1) var(--s-2);
     position: relative;
   }
-  .artifact-item:hover { background: var(--ink-2); }
-  .artifact-item.active { background: oklch(74% 0.155 45 / 0.09); }
+  .artifact-item:hover { background: var(--raised); }
+  .artifact-item.active { background: var(--accent-wash-soft); }
   .artifact-item.active::before {
     content: ""; position: absolute;
-    left: -10px; top: 8px; bottom: 8px; width: 2px;
-    background: var(--ember); border-radius: 2px;
+    left: calc(var(--s-2) * -1 - 1px); top: 5px; bottom: 5px; width: 2px;
+    background: var(--accent); border-radius: 2px;
   }
   .artifact-item .title {
+    flex: 1; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font-size: 13px;
+    font-size: var(--t-md);
   }
-  .artifact-item.active .title { color: var(--ember-hot); font-weight: 500; }
+  .artifact-item.active .title { color: var(--accent-hot); font-weight: 500; }
+  /* the time rides on the same line now: two lines per artifact made the list
+     twice as tall as it needed to be */
   .artifact-item .time {
-    color: var(--text-dim); font: 400 10.5px var(--font-mono); margin-top: 2px;
+    flex: none; color: var(--text-faint); font: 400 var(--t-xs) var(--font-sans);
   }
 
-  .empty-note { color: var(--text-dim); padding: 26px 14px; text-align: center; font-size: 12.5px; }
+  .empty-note {
+    color: var(--text-dim); padding: var(--s-5) var(--s-3);
+    text-align: center; font-size: var(--t-sm); line-height: 1.6;
+  }
+  .empty-note b { display: block; color: var(--text); font-size: var(--t-md); margin-bottom: var(--s-1); }
+  .empty-note code {
+    font: 400 var(--t-xs) var(--font-mono); color: var(--accent);
+  }
 
   /* ------------------------------------------------------------------- main */
 
   #main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
   #topbar {
-    display: flex; align-items: center; gap: 14px;
-    padding: 11px 16px 11px 20px;
+    display: flex; align-items: center; gap: var(--s-3);
+    flex: none; height: var(--header-h); padding: 0 var(--s-4);
     border-bottom: 1px solid var(--line);
-    background: var(--ink-1);
+    background: var(--panel);
   }
   #topbar .headings { min-width: 0; flex: 1; }
   #topbar-title {
-    font: 600 14.5px/1.3 var(--font-sans); letter-spacing: -0.01em;
+    font: 600 var(--t-lg)/1.3 var(--font-sans); letter-spacing: -0.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  /* the crumb is a path of machine identifiers, so it stays mono */
   #topbar-crumbs {
-    margin-top: 3px;
-    font: 400 10.5px/1.3 var(--font-mono); color: var(--text-dim);
+    margin-top: 2px;
+    font: 400 var(--t-xs)/1.3 var(--font-mono); color: var(--text-dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #topbar-crumbs .sep { opacity: .45; padding: 0 5px; }
-  #topbar-crumbs .ember { color: var(--ember); opacity: .9; }
+  #topbar-crumbs .sep { opacity: .45; padding: 0 var(--s-1); }
+  #topbar-crumbs .accent { color: var(--accent); }
+  /* relative times are prose, not identifiers */
+  #topbar-crumbs .when { font-family: var(--font-sans); }
   .tool-btn {
     flex: none; display: grid; place-items: center;
     width: 30px; height: 30px;
-    background: none; border: 1px solid var(--line); border-radius: 8px;
+    background: none; border: 1px solid var(--line); border-radius: var(--r-md);
     color: var(--text-dim); font: 400 13px/1 var(--font-sans);
     cursor: pointer; text-decoration: none;
     transition: color .15s, border-color .15s;
   }
-  .tool-btn:hover { color: var(--ember-hot); border-color: var(--ember); }
+  .tool-btn:hover { color: var(--accent-hot); border-color: var(--accent); }
   .tool-btn[aria-disabled="true"] { opacity: .35; pointer-events: none; }
 
-  /* the stage frames the artifact: the one light surface in a dark shell */
-  #stage { flex: 1; display: flex; position: relative; min-height: 0; padding: 14px; }
-  #frame {
-    flex: 1; display: flex; min-width: 0;
-    border-radius: 12px; overflow: hidden;
-    /* the documented "--glow" signature: a lit artifact panel in a dark shell */
-    box-shadow: 0 0 0 1px var(--line), 0 20px 46px -32px oklch(74% 0.155 45 / 0.3);
+  /* single artifact ⇄ scrollable timeline of the whole session */
+  #mode-switch {
+    flex: none; display: flex; gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: 2px;
   }
-  #viewer { flex: 1; border: 0; width: 100%; background: #fff; }
+  #mode-switch button {
+    display: grid; place-items: center;
+    width: 26px; height: 24px;
+    background: none; border: 0; cursor: pointer;
+    color: var(--text-dim);
+    padding: 0; border-radius: var(--r-sm);
+    transition: color .15s, background .15s;
+  }
+  #mode-switch button:hover { color: var(--text); }
+  #mode-switch button[aria-pressed="true"] {
+    background: var(--accent); color: var(--accent-ink);
+  }
+  #mode-switch svg { display: block; }
+  @media (prefers-reduced-motion: reduce) { #mode-switch button { transition: none; } }
+
+  /* Single mode gives the artifact the whole stage, edge to edge — no frame of
+     our own around it. Only the timeline needs cards, because it stacks many. */
+  #stage { flex: 1; display: flex; position: relative; min-height: 0; }
+  #frame { flex: 1; display: flex; min-width: 0; }
+  #viewer { flex: 1; border: 0; width: 100%; background: var(--artifact-bg); }
   #placeholder {
     flex: 1; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     color: var(--text-dim); gap: 12px; padding: 24px; text-align: center;
   }
-  #placeholder .logo { font-size: 38px; color: var(--ember); opacity: .8; }
-  #placeholder-text { max-width: 34ch; }
+  #placeholder .logo { font-size: 38px; color: var(--accent); opacity: .8; }
+  #placeholder-text { font: 600 var(--t-lg)/1.4 var(--font-sans); color: var(--text); max-width: 34ch; }
+  #placeholder .hint {
+    margin: 0; max-width: 46ch;
+    font-size: var(--t-md); line-height: 1.65; color: var(--text-dim);
+  }
+  #placeholder .example {
+    margin: var(--s-1) 0 0;
+    font: 400 var(--t-sm) var(--font-mono); color: var(--accent);
+  }
+
+  /* timeline: every artifact of the session in one scroll, oldest first */
+  #timeline {
+    flex: 1; min-width: 0;
+    display: none; flex-direction: column; gap: var(--s-3);
+    overflow-y: auto;
+    padding: var(--s-3);
+    scroll-behavior: smooth;
+  }
+  #stage.timeline #timeline { display: flex; }
+  .tl-card {
+    flex: none;
+    background: var(--panel);
+    border-radius: var(--r-lg); overflow: hidden;
+    box-shadow: 0 0 0 1px var(--line), var(--shadow-card);
+    scroll-margin: var(--s-3);
+    transition: box-shadow .2s;
+  }
+  .tl-card.focused { box-shadow: 0 0 0 1px var(--accent); }
+  .tl-head {
+    display: flex; align-items: center; gap: var(--s-2);
+    height: 38px; padding: 0 var(--s-2) 0 var(--s-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .tl-num {
+    flex: none; font: 400 var(--t-xs)/1 var(--font-mono); color: var(--text-faint);
+  }
+  .tl-title {
+    flex: 1; min-width: 0;
+    font: 600 var(--t-md)/1 var(--font-sans);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tl-time { flex: none; font: 400 var(--t-xs)/1 var(--font-sans); color: var(--text-faint); }
+  .tl-card .tool-btn { width: 24px; height: 24px; font-size: 11px; }
+  .tl-frame {
+    display: block; width: 100%; border: 0; background: var(--artifact-bg);
+    height: 300px; /* replaced by the height the artifact reports about itself */
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #timeline { scroll-behavior: auto; }
+    .tl-card { transition: none; }
+  }
 
   /* composer: talk to the selected session from the browser, no artifact required */
   #composer {
-    display: flex; gap: 10px; align-items: center;
-    padding: 12px 14px;
+    display: flex; gap: var(--s-2); align-items: center;
+    padding: var(--s-3);
     border-top: 1px solid var(--line);
-    background: var(--ink-1);
+    background: var(--panel);
   }
   #composer input {
     flex: 1; min-width: 0;
-    background: var(--ink-0); color: var(--text);
-    border: 1px solid var(--line); border-radius: 9px;
-    padding: 10px 14px; font: 13.5px var(--font-sans);
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: 10px var(--s-3); font: var(--t-md) var(--font-sans);
     outline: none;
     transition: border-color .15s;
   }
-  #composer input:focus { border-color: var(--ember); }
+  #composer input:focus { border-color: var(--accent); }
   #composer input::placeholder { color: var(--text-dim); }
   #composer input:disabled { opacity: .55; cursor: not-allowed; }
   #composer button {
-    background: var(--ember); color: var(--ember-ink);
-    border: 0; border-radius: 8px;
-    padding: 10px 18px; font: 600 12px var(--font-mono);
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: var(--r-md);
+    padding: 10px var(--s-4); font: 600 var(--t-sm) var(--font-sans);
     cursor: pointer;
   }
-  #composer button:hover { background: var(--ember-hot); }
+  #composer button:hover { background: var(--accent-hot); }
   #composer button:disabled { opacity: .5; cursor: default; }
 
   /* -------------------------------------------------------------- statusbar */
 
   #statusbar {
     grid-column: 1 / -1;
-    display: flex; align-items: center; gap: 0;
-    padding: 0 12px;
+    display: flex; align-items: center;
+    padding: 0 var(--s-4);
     border-top: 1px solid var(--line);
-    background: var(--ink-1);
-    font: 400 10.5px/1 var(--font-mono);
+    background: var(--panel);
+    font: 400 var(--t-xs)/1 var(--font-sans);
     color: var(--text-dim);
     white-space: nowrap; overflow: hidden;
   }
-  #statusbar .item {
-    padding: 0 10px;
-    overflow: hidden; text-overflow: ellipsis;
+  /* dot separators rather than a rule between every counter */
+  #statusbar .item { overflow: hidden; text-overflow: ellipsis; }
+  #statusbar .item + .item::before {
+    content: "·"; color: var(--text-faint);
+    padding: 0 var(--s-2);
   }
-  #statusbar .item + .item { border-left: 1px solid var(--line); }
-  #statusbar .spacer { flex: 1; min-width: 8px; }
-  #statusbar #sb-conn { display: flex; align-items: center; gap: 6px; }
-  #statusbar #sb-queued { color: var(--ember); }
-  #statusbar #sb-version { color: var(--text); opacity: .8; }
+  #statusbar .spacer { flex: 1; min-width: var(--s-2); }
+  #statusbar #sb-conn { display: flex; align-items: center; gap: var(--s-2); }
+  /* host:port and the version are machine identifiers */
+  #statusbar #sb-host, #statusbar #sb-version { font-family: var(--font-mono); }
+  #statusbar #sb-queued { color: var(--accent); }
+  #statusbar #sb-version { color: var(--text); }
   #status-dot {
     width: 7px; height: 7px; border-radius: 50%; flex: none;
-    background: oklch(58% 0.18 25);
+    background: var(--danger);
     transition: background .3s, box-shadow .3s;
   }
-  #status-dot.connected { background: var(--ok); box-shadow: 0 0 7px oklch(78% 0.14 155 / 0.5); }
+  #status-dot.connected { background: var(--ok); box-shadow: 0 0 7px var(--ok-glow); }
 
   #toast {
     position: fixed;
     bottom: calc(var(--statusbar-h) + 72px); left: 50%;
     transform: translateX(-50%) translateY(160px);
-    background: var(--ember); color: var(--ember-ink);
+    background: var(--accent); color: var(--accent-ink);
     border: 0;
     padding: 9px 18px;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     font: 600 12.5px var(--font-mono);
     transition: transform .25s cubic-bezier(0.22, 1, 0.36, 1);
     pointer-events: none;
-    box-shadow: 0 0 24px oklch(74% 0.155 45 / 0.4);
+    box-shadow: 0 0 24px var(--accent-glow);
     z-index: 10;
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
@@ -319,9 +536,9 @@
     </header>
 
     <div class="pane" id="nav-pane">
-      <div class="pane-label">artifacts <span class="hint">by project · session</span></div>
+      <div class="pane-label">artifacts</div>
       <div class="pane-body" id="session-list">
-        <div class="empty-note" id="sessions-empty">No agent sessions yet.</div>
+        <div class="empty-note" id="sessions-empty"><b>No agent sessions yet</b>Start an agent in any project — it attaches here automatically.</div>
       </div>
     </div>
   </div>
@@ -332,6 +549,22 @@
         <div id="topbar-title">agent-sidecar canvas</div>
         <div id="topbar-crumbs">waiting for a session</div>
       </div>
+      <div id="mode-switch" role="group" aria-label="View mode (t to toggle)">
+        <!-- one filled pane vs. a stack of panes running off the bottom edge -->
+        <button type="button" data-mode="single" aria-pressed="true" aria-label="Single artifact view (t)" title="Single — one artifact at a time (t)">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="2.75" y="2.75" width="10.5" height="10.5" rx="1.75" />
+          </svg>
+        </button>
+        <button type="button" data-mode="timeline" aria-pressed="false" aria-label="Timeline view (t)" title="Timeline — every artifact of this session in one scroll (t)">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="2.75" y="1.75" width="10.5" height="4.5" rx="1.4" />
+            <rect x="2.75" y="8.25" width="10.5" height="4.5" rx="1.4" />
+            <path d="M4.6 14.9h6.8" stroke-linecap="round" opacity=".55" />
+          </svg>
+        </button>
+      </div>
+      <button class="tool-btn" id="btn-theme" type="button" title="Switch theme" aria-label="Switch theme"></button>
       <button class="tool-btn" id="btn-reload" type="button" title="Reload this artifact" aria-label="Reload this artifact" aria-disabled="true">↻</button>
       <a class="tool-btn" id="btn-open" href="#" target="_blank" rel="noopener" title="Open this artifact in a new tab" aria-label="Open this artifact in a new tab" aria-disabled="true">↗</a>
     </div>
@@ -340,11 +573,19 @@
       <div id="placeholder">
         <div class="logo">✳</div>
         <div id="placeholder-text">Artifacts your agent creates will appear here.</div>
+        <p class="hint">
+          Ask for anything worth seeing rather than reading — design options, a form,
+          a diagram, a dashboard. Whatever you click comes back to the agent as its
+          next message.
+        </p>
+        <p class="example">“show me three layout options as an artifact”</p>
       </div>
       <!-- sandboxed: artifact JS runs in an opaque origin and talks back only via postMessage -->
       <div id="frame" style="display:none">
         <iframe id="viewer" title="artifact" sandbox="allow-scripts allow-forms allow-popups"></iframe>
       </div>
+      <!-- timeline mode: one card per artifact, built in renderTimeline() -->
+      <div id="timeline" aria-label="Session timeline"></div>
     </div>
 
     <div id="composer">
@@ -374,11 +615,15 @@
   const sessionsEmpty = el('sessions-empty')
   const viewer = el('viewer')
   const frame = el('frame')
+  const stage = el('stage')
+  const timeline = el('timeline')
+  const modeButtons = [...document.querySelectorAll('#mode-switch button')]
   const placeholder = el('placeholder')
   const placeholderText = el('placeholder-text')
   const topbarTitle = el('topbar-title')
   const topbarCrumbs = el('topbar-crumbs')
   const btnReload = el('btn-reload')
+  const btnTheme = el('btn-theme')
   const btnOpen = el('btn-open')
   const statusDot = el('status-dot')
   const sbConnText = el('sb-conn-text')
@@ -397,12 +642,59 @@
   const unseen = new Map()
   /** sessions whose artifact list is expanded in the tree */
   const expanded = new Set()
+  /** worktree groups the user has folded away (expanded is the default) */
+  const collapsedWorktrees = new Set()
   let selectedSessionId = null
   let activeArtifactId = null
+  /** 'single' shows one artifact at a time, 'timeline' the whole session in one scroll */
+  let viewMode = 'single'
+  try {
+    if (localStorage.getItem('sidecar:viewMode') === 'timeline') viewMode = 'timeline'
+  } catch {
+    // storage unavailable — start in single mode
+  }
   let serverInfo = null
   let toastAction = null
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  /** "3m ago" beats "08:50 PM" on a canvas you watch while an agent works. */
+  function fmtAgo(ts) {
+    const secs = Math.max(0, Math.round((Date.now() - ts) / 1000))
+    if (secs < 45) return 'just now'
+    const mins = Math.round(secs / 60)
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.round(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.round(hours / 24)}d ago`
+  }
+
+  /** Same thing without the words, for the sidebar where titles need the room. */
+  function fmtAgoShort(ts) {
+    const secs = Math.max(0, Math.round((Date.now() - ts) / 1000))
+    if (secs < 45) return 'now'
+    const mins = Math.round(secs / 60)
+    if (mins < 60) return `${mins}m`
+    const hours = Math.round(mins / 60)
+    if (hours < 24) return `${hours}h`
+    return `${Math.round(hours / 24)}d`
+  }
+
+  /** Stamps an element with a time that keeps itself current. */
+  function setAgo(node, ts, opts = {}) {
+    node.dataset.ts = ts
+    node.dataset.short = opts.short ? '1' : ''
+    node.textContent = opts.short ? fmtAgoShort(ts) : fmtAgo(ts)
+    node.title = new Date(ts).toLocaleString()
+  }
+
+  // relative times go stale silently, so re-read them on a slow tick
+  setInterval(() => {
+    for (const node of document.querySelectorAll('[data-ts]')) {
+      const ts = Number(node.dataset.ts)
+      node.textContent = node.dataset.short ? fmtAgoShort(ts) : fmtAgo(ts)
+    }
+  }, 30_000)
   const session = id => sessions.get(id) || null
   const sessionOfArtifact = artifactId => {
     for (const s of sessions.values()) if (s.artifacts.some(a => a.id === artifactId)) return s
@@ -437,40 +729,132 @@
 
   // --- rendering ------------------------------------------------------------
 
-  /** project -> its sessions, oldest first. The shape the sidebar tree renders. */
-  function groupByProject() {
-    const byProject = new Map()
+  /**
+   * repo -> worktree -> sessions, oldest session first. Sessions in two checkouts of
+   * one repo share a repoKey, so they group together instead of looking unrelated.
+   * A session from a server that predates origins falls back to its own directory.
+   */
+  function buildTree() {
+    const repos = new Map()
     for (const s of [...sessions.values()].sort((a, b) => a.startedAt - b.startedAt)) {
-      if (!byProject.has(s.project)) byProject.set(s.project, [])
-      byProject.get(s.project).push(s)
+      const o = originOf(s)
+      let repo = repos.get(o.repoKey)
+      if (!repo) {
+        repo = { key: o.repoKey, name: o.repo, kind: o.repoKind, remote: o.remote, worktrees: new Map() }
+        repos.set(o.repoKey, repo)
+      }
+      let wt = repo.worktrees.get(o.worktree)
+      if (!wt) {
+        wt = { name: o.worktree, isMain: o.worktreeIsMain, sessions: [] }
+        repo.worktrees.set(o.worktree, wt)
+      }
+      wt.sessions.push(s)
     }
-    return [...byProject].sort((a, b) => a[0].localeCompare(b[0]))
+    for (const repo of repos.values()) {
+      // the main checkout leads, linked worktrees follow alphabetically
+      repo.list = [...repo.worktrees.values()].sort((a, b) =>
+        a.isMain === b.isMain ? a.name.localeCompare(b.name) : a.isMain ? -1 : 1,
+      )
+      repo.sessionCount = repo.list.reduce((n, wt) => n + wt.sessions.length, 0)
+      repo.liveCount = repo.list.reduce((n, wt) => n + wt.sessions.filter(s => s.live).length, 0)
+    }
+    return [...repos.values()].sort(
+      (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
+    )
   }
 
+  const originOf = s =>
+    s.origin || {
+      repoKey: s.cwd,
+      repo: s.project,
+      repoKind: 'dir',
+      worktree: s.project,
+      worktreeIsMain: true,
+    }
+
+  const worktreeKey = (repo, wt) => repo.key + ' ' + wt.name
+
   function renderTree() {
-    sessionList.querySelectorAll('.project').forEach(n => n.remove())
+    sessionList.querySelectorAll('.repo').forEach(n => n.remove())
     sessionsEmpty.style.display = sessions.size ? 'none' : 'block'
 
-    for (const [project, rows] of groupByProject()) {
+    for (const repo of buildTree()) {
       const group = document.createElement('div')
-      group.className = 'project'
+      group.className = 'repo' + (repo.kind === 'git' ? '' : ' dir')
 
       const head = document.createElement('div')
-      head.className = 'project-head'
+      head.className = 'repo-head'
       const name = document.createElement('div')
-      name.className = 'project-name'
-      name.textContent = project
-      name.title = rows[0].cwd
+      name.className = 'repo-name'
+      name.textContent = repo.name
+      name.title = repo.remote ? `${repo.remote}\n${repo.key}` : repo.key
       const count = document.createElement('div')
-      count.className = 'project-count'
-      const liveHere = rows.filter(s => s.live).length
-      count.textContent = liveHere ? `${liveHere} live` : plural(rows.length, 'session')
+      count.className = 'repo-count'
+      // a plain directory says so; a repo doesn't need announcing
+      count.textContent = repo.liveCount
+        ? `${repo.liveCount} live`
+        : plural(repo.sessionCount, 'session')
+      if (repo.kind !== 'git') count.textContent += ' · directory'
       head.append(name, count)
       group.appendChild(head)
 
-      for (const s of rows) group.appendChild(renderSession(s))
+      // one checkout needs no worktree level — that's the common case, kept flat
+      if (repo.list.length < 2) {
+        for (const s of repo.list[0].sessions) group.appendChild(renderSession(s))
+      } else {
+        for (const wt of repo.list) group.appendChild(renderWorktree(repo, wt))
+      }
       sessionList.appendChild(group)
     }
+  }
+
+  function renderWorktree(repo, wt) {
+    const key = worktreeKey(repo, wt)
+    const isOpen = !collapsedWorktrees.has(key)
+
+    const box = document.createElement('div')
+    box.className = 'worktree' + (wt.isMain ? ' main' : ' linked')
+
+    const row = document.createElement('div')
+    row.className = 'worktree-row'
+
+    const twist = document.createElement('button')
+    twist.type = 'button'
+    twist.className = 'twist'
+    twist.setAttribute('aria-expanded', String(isOpen))
+    twist.setAttribute('aria-label', `${isOpen ? 'Collapse' : 'Expand'} worktree ${wt.name}`)
+    twist.innerHTML = '<span>▾</span>'
+    twist.addEventListener('click', () => {
+      if (collapsedWorktrees.has(key)) collapsedWorktrees.delete(key)
+      else collapsedWorktrees.add(key)
+      renderTree()
+    })
+
+    const main = document.createElement('div')
+    main.className = 'worktree-main'
+    const name = document.createElement('span')
+    name.className = 'name'
+    name.textContent = wt.name
+    const tag = document.createElement('span')
+    tag.className = 'tag'
+    // "main" would just echo the branch label on the session row beneath it
+    tag.textContent = 'worktree'
+    main.append(name, tag)
+    main.title = wt.isMain ? 'the repo’s main checkout' : 'a linked git worktree'
+
+    const count = document.createElement('span')
+    count.className = 'count'
+    count.textContent = wt.sessions.length > 1 ? plural(wt.sessions.length, 'session') : ''
+    row.append(twist, main, count)
+    box.appendChild(row)
+
+    if (isOpen) {
+      const nested = document.createElement('div')
+      nested.className = 'wt-sessions'
+      for (const s of wt.sessions) nested.appendChild(renderSession(s))
+      box.appendChild(nested)
+    }
+    return box
   }
 
   function renderSession(s) {
@@ -568,7 +952,7 @@
       title.textContent = a.title
       const time = document.createElement('div')
       time.className = 'time'
-      time.textContent = fmtTime(a.createdAt)
+      setAgo(time, a.createdAt, { short: true })
       row.append(title, time)
       row.addEventListener('click', () => selectArtifact(a.id))
       list.appendChild(row)
@@ -580,14 +964,24 @@
     const s = session(selectedSessionId)
     const a = s && activeArtifactId ? s.artifacts.find(x => x.id === activeArtifactId) : null
 
-    topbarTitle.textContent = a ? a.title : s ? 'No artifact selected' : 'agent-sidecar canvas'
+    const count = s ? s.artifacts.length : 0
+    topbarTitle.textContent =
+      viewMode === 'timeline' && count
+        ? `${plural(count, 'artifact')} in this session`
+        : a
+          ? a.title
+          : s
+            ? 'No artifact selected'
+            : 'agent-sidecar canvas'
     topbarCrumbs.textContent = ''
     if (s) {
-      const bits = [s.project, s.label]
+      const o = originOf(s)
+      // the worktree only earns a crumb when it isn't the repo's main checkout
+      const bits = o.worktreeIsMain ? [o.repo, s.label] : [o.repo, o.worktree, s.label]
       bits.forEach((bit, i) => {
         if (i) topbarCrumbs.append(sep('/'))
         const span = document.createElement('span')
-        if (i === 1) span.className = 'ember'
+        if (i === bits.length - 1) span.className = 'accent'
         span.textContent = bit
         topbarCrumbs.appendChild(span)
       })
@@ -597,7 +991,11 @@
       }
       if (a) {
         topbarCrumbs.append(sep('·'))
-        topbarCrumbs.append(document.createTextNode(`updated ${fmtTime(a.updatedAt)}`))
+        topbarCrumbs.append(
+          document.createTextNode(
+            viewMode === 'timeline' ? `at ${a.title}` : `updated ${fmtTime(a.updatedAt)}`,
+          ),
+        )
       }
     } else {
       topbarCrumbs.textContent = 'waiting for a session'
@@ -606,7 +1004,8 @@
     const url = a ? '/artifact/' + encodeURIComponent(a.id) : '#'
     btnOpen.href = url
     btnOpen.setAttribute('aria-disabled', String(!a))
-    btnReload.setAttribute('aria-disabled', String(!a))
+    btnReload.setAttribute('aria-disabled', String(!a && !cards.size))
+    btnReload.title = viewMode === 'timeline' ? 'Reload every artifact' : 'Reload this artifact'
   }
 
   function sep(char) {
@@ -624,7 +1023,7 @@
     noteInput.placeholder = !s
       ? 'No session to talk to yet…'
       : s.live
-        ? `Tell ${s.project} / ${s.label} something…`
+        ? `Tell ${originOf(s).repo} / ${s.label} something…`
         : 'This session has ended'
   }
 
@@ -636,7 +1035,10 @@
 
     sbHost.textContent = serverInfo ? `127.0.0.1:${serverInfo.port}` : '—'
     sbHost.title = serverInfo ? `sidecar server pid ${serverInfo.pid}, started ${serverInfo.startedAt}` : ''
-    sbSessions.textContent = all.length ? `${live} live / ${plural(all.length, 'session')}` : 'no sessions'
+    const repos = new Set(all.map(s => originOf(s).repoKey)).size
+    sbSessions.textContent = all.length
+      ? `${plural(repos, 'repo')} · ${live} live / ${plural(all.length, 'session')}`
+      : 'no sessions'
     sbArtifacts.textContent = plural(artifacts, 'artifact')
     sbQueued.hidden = queued === 0
     sbQueued.textContent = `${plural(queued, 'reply')} queued`
@@ -662,9 +1064,170 @@
     activeArtifactId = null
     frame.style.display = 'none'
     viewer.src = 'about:blank'
+    clearTimeline()
+    stage.classList.remove('timeline')
     placeholderText.textContent = text
     placeholder.style.display = 'flex'
   }
+
+  // --- timeline mode --------------------------------------------------------
+
+  /** artifact id -> { card, frame } for the timeline currently on screen */
+  const cards = new Map()
+  /** which session the on-screen timeline was built for */
+  let timelineSessionId = null
+
+  function clearTimeline() {
+    timeline.textContent = ''
+    cards.clear()
+    timelineSessionId = null
+  }
+
+  function timelineCard(a, index) {
+    const card = document.createElement('div')
+    card.className = 'tl-card' + (a.id === activeArtifactId ? ' focused' : '')
+    card.dataset.artifact = a.id
+
+    const head = document.createElement('div')
+    head.className = 'tl-head'
+    const num = document.createElement('span')
+    num.className = 'tl-num'
+    num.textContent = String(index + 1).padStart(2, '0')
+    const title = document.createElement('span')
+    title.className = 'tl-title'
+    title.textContent = a.title
+    const time = document.createElement('span')
+    time.className = 'tl-time'
+    setAgo(time, a.createdAt)
+    const open = document.createElement('a')
+    open.className = 'tool-btn'
+    open.href = '/artifact/' + encodeURIComponent(a.id)
+    open.target = '_blank'
+    open.rel = 'noopener'
+    open.textContent = '↗'
+    open.title = 'Open this artifact in a new tab'
+    open.setAttribute('aria-label', `Open ${a.title} in a new tab`)
+    head.append(num, title, time, open)
+
+    const view = document.createElement('iframe')
+    view.className = 'tl-frame'
+    view.title = a.title
+    view.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups')
+    view.src = '/artifact/' + encodeURIComponent(a.id) + '?v=' + a.updatedAt
+
+    card.append(head, view)
+    // clicking a card makes it the focused one, so the sidebar and hash follow
+    card.addEventListener('click', () => focusCard(a.id, { scroll: false }))
+    cards.set(a.id, { card, frame: view })
+    return card
+  }
+
+  function renderTimeline() {
+    const items = artifactsOf(selectedSessionId) // oldest first: it's a timeline
+    clearTimeline()
+    timelineSessionId = selectedSessionId
+    items.forEach((a, i) => timeline.appendChild(timelineCard(a, i)))
+  }
+
+  /** Keeps the 01/02/03 counters honest after a removal. */
+  function renumberCards() {
+    let n = 1
+    for (const { card } of cards.values()) card.querySelector('.tl-num').textContent = String(n++).padStart(2, '0')
+  }
+
+  /** Marks one card as the focused artifact, optionally scrolling it into view. */
+  function focusCard(id, opts = {}) {
+    if (!cards.has(id)) return
+    activeArtifactId = id
+    location.hash = id
+    for (const [artifactId, entry] of cards) {
+      entry.card.classList.toggle('focused', artifactId === id)
+    }
+    if (opts.scroll !== false) cards.get(id).card.scrollIntoView({ block: 'nearest' })
+    renderTree()
+    renderTopbar()
+  }
+
+  /** The artifact tells us how tall it is — the shell can't measure across origins. */
+  function applyReportedHeight(artifactId, height) {
+    const entry = cards.get(artifactId)
+    if (!entry) return
+    // clamped: a tiny artifact still reads as a card, a huge one scrolls inside
+    const h = Math.max(180, Math.min(Math.round(height), 760))
+    if (entry.frame.style.height !== h + 'px') entry.frame.style.height = h + 'px'
+  }
+
+  function setMode(mode, opts = {}) {
+    viewMode = mode === 'timeline' ? 'timeline' : 'single'
+    try {
+      localStorage.setItem('sidecar:viewMode', viewMode)
+    } catch {
+      // private mode / storage disabled — the choice just won't persist
+    }
+    for (const btn of modeButtons) {
+      btn.setAttribute('aria-pressed', String(btn.dataset.mode === viewMode))
+    }
+    if (!session(selectedSessionId) || !artifactsOf(selectedSessionId).length) {
+      showPlaceholder('Artifacts your agent creates will appear here.')
+      render()
+      return
+    }
+    // re-enter the current artifact through the other mode's rendering path
+    const keep = activeArtifactId || artifactsOf(selectedSessionId).slice(-1)[0].id
+    if (viewMode === 'single') clearTimeline()
+    stage.classList.toggle('timeline', viewMode === 'timeline')
+    selectArtifact(keep, { scroll: opts.scroll !== false })
+  }
+
+  for (const btn of modeButtons) {
+    btn.addEventListener('click', () => setMode(btn.dataset.mode))
+    // reflect the mode restored from localStorage before any session arrives
+    btn.setAttribute('aria-pressed', String(btn.dataset.mode === viewMode))
+  }
+
+  // --- theme ----------------------------------------------------------------
+
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
+  const SUN = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.4v1.5M8 13.1v1.5M14.6 8h-1.5M2.9 8H1.4M12.67 3.33l-1.06 1.06M4.39 11.61l-1.06 1.06M12.67 12.67l-1.06-1.06M4.39 4.39L3.33 3.33" stroke-linecap="round"/></svg>'
+  const MOON = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.2 9.9A5.6 5.6 0 0 1 6.1 2.8a5.6 5.6 0 1 0 7.1 7.1Z" stroke-linejoin="round"/></svg>'
+
+  /** The theme actually on screen, whether chosen or inherited from the system. */
+  function activeTheme() {
+    return document.documentElement.dataset.theme || (systemDark.matches ? 'dark' : 'light')
+  }
+
+  function paintThemeButton() {
+    const next = activeTheme() === 'dark' ? 'light' : 'dark'
+    // the button shows where it takes you, not where you are
+    btnTheme.innerHTML = next === 'light' ? SUN : MOON
+    btnTheme.title = `Switch to ${next} theme`
+    btnTheme.setAttribute('aria-label', `Switch to ${next} theme`)
+  }
+
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('sidecar:theme', theme)
+    } catch {
+      // storage disabled — the choice lasts for this tab only
+    }
+    paintThemeButton()
+  }
+
+  // (the saved theme was already applied by the inline script in <head>)
+  paintThemeButton()
+  btnTheme.addEventListener('click', () => setTheme(activeTheme() === 'dark' ? 'light' : 'dark'))
+  // with no explicit choice, track the system as it changes
+  systemDark.addEventListener('change', () => {
+    if (!document.documentElement.dataset.theme) paintThemeButton()
+  })
+
+  // `t` toggles the mode, unless you're typing a note
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 't' || ev.metaKey || ev.ctrlKey || ev.altKey) return
+    if (document.activeElement === noteInput) return
+    setMode(viewMode === 'timeline' ? 'single' : 'timeline')
+  })
 
   function selectSession(id, opts = {}) {
     if (!session(id)) return
@@ -686,20 +1249,42 @@
     }
   }
 
-  function selectArtifact(id) {
+  function selectArtifact(id, opts = {}) {
     const owner = sessionOfArtifact(id)
     if (!owner) return
     if (owner.id !== selectedSessionId) return selectSession(owner.id, { artifactId: id })
     const a = owner.artifacts.find(x => x.id === id)
+    placeholder.style.display = 'none'
+
+    if (viewMode === 'timeline') {
+      stage.classList.add('timeline')
+      frame.style.display = 'none'
+      viewer.src = 'about:blank' // don't keep a second copy of the artifact running
+      if (timelineSessionId !== selectedSessionId) renderTimeline()
+      focusCard(id, opts)
+      renderComposer()
+      renderStatus()
+      return
+    }
+
+    stage.classList.remove('timeline')
+    clearTimeline()
     activeArtifactId = id
     location.hash = id
-    placeholder.style.display = 'none'
     frame.style.display = 'flex'
     viewer.src = '/artifact/' + encodeURIComponent(id) + '?v=' + a.updatedAt
     render()
   }
 
   btnReload.addEventListener('click', () => {
+    if (viewMode === 'timeline') {
+      // reload every card: in timeline mode "this artifact" is the whole session
+      for (const [id, entry] of cards) {
+        const a = session(selectedSessionId)?.artifacts.find(x => x.id === id)
+        if (a) entry.frame.src = '/artifact/' + encodeURIComponent(id) + '?v=' + Date.now()
+      }
+      return
+    }
     if (activeArtifactId) selectArtifact(activeArtifactId)
   })
 
@@ -746,6 +1331,11 @@
 
     const showing = session(selectedSessionId)
     if (msg.sessionId === selectedSessionId) {
+      // append rather than rebuild: recreating the other iframes would reset
+      // whatever the user has half-filled in them
+      if (viewMode === 'timeline' && timelineSessionId === selectedSessionId) {
+        timeline.appendChild(timelineCard(msg.artifact, cards.size))
+      }
       selectArtifact(msg.artifact.id) // within the session you're watching, newest wins
       return
     }
@@ -757,7 +1347,9 @@
     // badge instead of yanking the view out from under an interaction elsewhere
     unseen.set(msg.sessionId, (unseen.get(msg.sessionId) || 0) + 1)
     render()
-    showToast(`✳ ${s.project} · ${s.label}`, () => selectSession(s.id, { artifactId: msg.artifact.id }))
+    const o = originOf(s)
+    const where = o.worktreeIsMain ? o.repo : `${o.repo} / ${o.worktree}`
+    showToast(`✳ ${where} · ${s.label}`, () => selectSession(s.id, { artifactId: msg.artifact.id }))
   }
 
   function connect() {
@@ -794,8 +1386,16 @@
         const s = session(msg.sessionId)
         if (!s) return
         s.artifacts = s.artifacts.map(a => (a.id === msg.artifact.id ? msg.artifact : a))
-        if (msg.artifact.id === activeArtifactId) selectArtifact(msg.artifact.id) // reload iframe
-        else {
+        const onTimeline = cards.get(msg.artifact.id)
+        if (onTimeline) {
+          // hot-reload just this card, leaving its neighbours alone
+          onTimeline.card.querySelector('.tl-title').textContent = msg.artifact.title
+          onTimeline.frame.src =
+            '/artifact/' + encodeURIComponent(msg.artifact.id) + '?v=' + msg.artifact.updatedAt
+          render()
+        } else if (msg.artifact.id === activeArtifactId) {
+          selectArtifact(msg.artifact.id) // reload iframe
+        } else {
           if (msg.sessionId !== selectedSessionId) {
             unseen.set(msg.sessionId, (unseen.get(msg.sessionId) || 0) + 1)
           }
@@ -805,6 +1405,12 @@
         const s = session(msg.sessionId)
         if (!s) return
         s.artifacts = s.artifacts.filter(a => a.id !== msg.artifact.id)
+        const gone = cards.get(msg.artifact.id)
+        if (gone) {
+          gone.card.remove()
+          cards.delete(msg.artifact.id)
+          renumberCards()
+        }
         if (msg.artifact.id === activeArtifactId) {
           const rest = artifactsOf(selectedSessionId)
           if (rest.length) selectArtifact(rest[rest.length - 1].id)
@@ -815,16 +1421,35 @@
   }
   connect()
 
+  /**
+   * Which artifact a message came from, established by the frame it arrived in
+   * rather than by what the message claims — so one card can never answer for
+   * another. Returns null for any window that isn't one of our artifact frames.
+   */
+  function artifactOfSource(source) {
+    if (viewMode === 'single') return source === viewer.contentWindow ? activeArtifactId : null
+    for (const [id, entry] of cards) if (source === entry.frame.contentWindow) return id
+    return null
+  }
+
   // Send bridge: the sandboxed artifact iframe can't reach the server directly,
   // so claude.send() posts here and we forward it with the server token.
   window.addEventListener('message', async ev => {
     const d = ev.data
-    if (!d || d.type !== 'sidecar:send' || ev.source !== viewer.contentWindow) return
+    if (!d || (d.type !== 'sidecar:send' && d.type !== 'sidecar:height')) return
+    const artifactId = artifactOfSource(ev.source)
+    if (!artifactId) return
+
+    if (d.type === 'sidecar:height') {
+      applyReportedHeight(artifactId, Number(d.height) || 0)
+      return
+    }
+
     let ok = false
     try {
-      const owner = sessionOfArtifact(d.artifactId)
+      const owner = sessionOfArtifact(artifactId)
       const res = await post('/api/webhook', {
-        artifactId: d.artifactId,
+        artifactId,
         sessionId: owner ? owner.id : selectedSessionId,
         payload: d.payload,
       })
