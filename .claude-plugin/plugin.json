@@ -1,6 +1,6 @@
 {
   "name": "agent-sidecar",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "A visual canvas for coding agents: your agent shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation.",
   "author": {
     "name": "Sean Marchetti"
@@ -8,8 +8,8 @@
   "keywords": ["canvas", "artifacts", "visual", "mcp", "webhook"],
   "mcpServers": {
     "agent-sidecar": {
-      "command": "bunx",
-      "args": ["agent-sidecar@0.11.0"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/sidecar.js"]
     }
   }
 }

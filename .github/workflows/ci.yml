@@ -18,11 +18,23 @@ jobs:
         with:
           bun-version: latest
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # the floor in package.json engines
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build bundle (what npm publish ships)
+      - name: Build bundle (what npm publish and the plugin both ship)
         run: bun run build
 
-      - name: Run tests
+      # dist/ is committed so the Claude Code plugin can run it straight out of
+      # the plugin directory. A stale bundle would ship code nobody reviewed.
+      - name: Committed dist/ is up to date with src/
+        run: git diff --exit-code -- dist/
+
+      - name: Run tests (bun, working source)
         run: bun test
+
+      - name: Run tests (node, built bundle — what users actually run)
+        run: SIDECAR_TEST_RUNTIME=node bun test

@@ -225,27 +225,28 @@
 
     <div class="pill-row">
       <span class="pill">version <b>0.11.0</b></span>
-      <span class="pill">requires <b>Bun ≥ 1.2</b></span>
+      <span class="pill">requires <b>Node ≥ 20</b></span>
       <span class="pill">license <b>MIT</b></span>
       <span class="pill"><b>localhost</b> only</span>
     </div>
 
     <h2 id="install">Installation</h2>
-    <p>agent-sidecar is a Claude Code plugin (and a standard MCP server usable from <a href="#other-agents">other agents</a>). The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is <a href="https://bun.sh">Bun</a> on your PATH.</p>
+    <p>agent-sidecar is a Claude Code plugin (and a standard MCP server usable from <a href="#other-agents">other agents</a>). The repo doubles as its own plugin marketplace, and the server itself ships as a self-contained bundle on npm. The only prerequisite is Node 20+ on your PATH.</p>
     <pre><code><span class="c"># in any Claude Code session</span>
 <span class="g">›</span> /plugin marketplace add smarchetti/agent-sidecar
 <span class="g">›</span> /plugin install agent-sidecar@agent-sidecar</code></pre>
-    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>bunx agent-sidecar@0.11.0</code> — the first run fetches the package from npm and caches it; after that startup is instant. agent-sidecar is then available in <em>every</em> project.</p>
+    <p>Restart Claude Code (or <code>/reload-plugins</code>). The plugin launches <code>node ${CLAUDE_PLUGIN_ROOT}/dist/sidecar.js</code> — the bundle ships inside the plugin, so there is no registry fetch and installing works offline. agent-sidecar is then available in <em>every</em> project.</p>
     <p>Verify with <code>/mcp</code>: you should see <b>agent-sidecar</b> listed as connected.</p>
 
     <h2 id="other-agents">Other agents</h2>
-    <p>agent-sidecar is a standard MCP stdio server — the plugin is just Claude Code packaging. Any MCP client can run it with this one entry (Bun on PATH is still the only prerequisite):</p>
-    <pre><code>{ "mcpServers": { "agent-sidecar": { "command": "bunx", "args": ["agent-sidecar"] } } }</code></pre>
+    <p>agent-sidecar is a standard MCP stdio server — the plugin is just Claude Code packaging. Any MCP client can run it with this one entry:</p>
+    <pre><code>{ "mcpServers": { "agent-sidecar": { "command": "npx", "args": ["-y", "agent-sidecar"] } } }</code></pre>
+    <p>On a locked-down network, <code>npm i -g agent-sidecar</code> once and use <code>{ "command": "agent-sidecar" }</code> to skip the registry on every launch.</p>
     <table>
       <tr><th>Agent</th><th>Where to put it</th></tr>
       <tr><td>Cursor</td><td><code>.cursor/mcp.json</code> in the project, or <code>~/.cursor/mcp.json</code> globally</td></tr>
       <tr><td>VS Code (Copilot)</td><td><code>.vscode/mcp.json</code> — same entry, but under a <code>"servers"</code> key instead of <code>"mcpServers"</code></td></tr>
-      <tr><td>Codex CLI</td><td><code>~/.codex/config.toml</code>:<br/><code>[mcp_servers.agent-sidecar]</code> · <code>command = "bunx"</code> · <code>args = ["agent-sidecar"]</code></td></tr>
+      <tr><td>Codex CLI</td><td><code>~/.codex/config.toml</code>:<br/><code>[mcp_servers.agent-sidecar]</code> · <code>command = "npx"</code> · <code>args = ["-y", "agent-sidecar"]</code></td></tr>
       <tr><td>Gemini CLI</td><td><code>~/.gemini/settings.json</code> under <code>"mcpServers"</code></td></tr>
       <tr><td>Windsurf</td><td><code>~/.codeium/windsurf/mcp_config.json</code> under <code>"mcpServers"</code></td></tr>
     </table>
@@ -299,9 +300,9 @@
     <p>Grouping follows your checkouts rather than directory names: sessions in two <code>git worktree</code> checkouts of one repo nest under a single repo, keyed on the main worktree's git dir and named from the <code>origin</code> remote when there is one. The worktree level appears only when a repo has more than one checkout; a non-repo directory gets its own group, marked <code>dir</code>.</p>
     <p>A session that ends stays on the canvas, dimmed, so you can still read what it produced — dismiss it with the <code>×</code> on its row. When an artifact arrives in a session you aren't looking at, that session is badged and a clickable toast appears; the view never jumps out from under an interaction you're in the middle of.</p>
     <p>The server prefers port <code>8765</code> (override with <code>SIDECAR_PORT</code>) and scans upward if a foreign process holds it. It outlives your agent sessions and exits by itself after 30 minutes with no sessions and no canvas tab (<code>SIDECAR_IDLE_EXIT_MS</code>, <code>0</code> disables). Manage it directly:</p>
-    <pre><code>bunx agent-sidecar --status   <span class="c"># server, sessions, artifact counts</span>
-bunx agent-sidecar --stop     <span class="c"># shut it down</span>
-bunx agent-sidecar --serve    <span class="c"># run in the foreground (debugging)</span></code></pre>
+    <pre><code>npx agent-sidecar --status   <span class="c"># server, sessions, artifact counts</span>
+npx agent-sidecar --stop     <span class="c"># shut it down</span>
+npx agent-sidecar --serve    <span class="c"># run in the foreground (debugging)</span></code></pre>
     <p>Machine-wide state lives in <code>~/.agent-sidecar/</code> (override with <code>SIDECAR_HOME</code>):</p>
     <table>
       <tr><th>File</th><th>Contents</th></tr>
@@ -425,7 +426,8 @@ curl -X POST -H "X-Sidecar-Token: $token" \
     <pre><code>git clone https://github.com/smarchetti/agent-sidecar
 cd agent-sidecar
 bun install
-bun test          <span class="c"># 38 end-to-end tests over real MCP stdio</span></code></pre>
+bun test          <span class="c"># 55 end-to-end tests over real MCP stdio</span>
+bun run test:node <span class="c"># the same suite against the built bundle under node</span></code></pre>
     <p>Source lives in <code>src/</code>: <code>sidecar.ts</code> (CLI entry), <code>server.ts</code> (the singleton canvas server), <code>client.ts</code> (server discovery and the session link), <code>mcp.ts</code> (the tools), <code>shared.ts</code> (paths and types), and <code>canvas.html</code> (the browser shell, inlined into the bundle at build time). Tests run against an isolated server via <code>SIDECAR_HOME</code> and a random port, so they never touch the one you're using. To run your working copy in a live session:</p>
     <pre><code>claude --mcp-config dev.mcp.json</code></pre>
     <div class="callout"><b>Two sidecars warning:</b> if the plugin is installed globally, a dev session loads both the plugin server and your working copy — duplicate tool sets, and whichever starts first owns the canvas server for both. Disable the plugin while developing, and <code>--stop</code> the server after switching versions.</div>
@@ -437,10 +439,10 @@ bun test          <span class="c"># 38 end-to-end tests over real MCP stdio</spa
       <tr><td>Plugin doesn't load</td><td><code>/mcp</code> shows agent-sidecar? Is <code>bun</code> on PATH? First launch fetches from npm — needs network once.</td></tr>
       <tr><td>Canvas didn't open</td><td>The URL is in every <code>create_artifact</code> result and in <code>.sidecar/session.json</code>. Auto-open only fires when no tab is connected — one tab covers every session.</td></tr>
       <tr><td>Clicks not arriving</td><td><code>tail -f .sidecar/interactions.jsonl</code> — if clicks appear there, the agent just hasn't consumed them yet (<code>get_interactions</code> drains). If not, check <code>--status</code> and the browser console.</td></tr>
-      <tr><td>Can't see your session</td><td><code>bunx agent-sidecar --status</code> lists every session. Sessions are labelled by git branch, grouped by project.</td></tr>
+      <tr><td>Can't see your session</td><td><code>npx agent-sidecar --status</code> lists every session. Sessions are labelled by git branch, grouped by project.</td></tr>
       <tr><td>Wrong port</td><td>A foreign process holds 8765, so the server scanned upward. <code>server.json</code> and <code>session.json</code> always have the live URL.</td></tr>
       <tr><td>403 from the API</td><td>Missing/stale token — re-read <code>server.json</code>. The token survives server restarts but not a deleted <code>~/.agent-sidecar/</code>.</td></tr>
-      <tr><td>Server won't die</td><td><code>bunx agent-sidecar --stop</code>. It also self-exits after 30 idle minutes; <code>~/.agent-sidecar/server.log</code> has its output.</td></tr>
+      <tr><td>Server won't die</td><td><code>npx agent-sidecar --stop</code>. It also self-exits after 30 idle minutes; <code>~/.agent-sidecar/server.log</code> has its output.</td></tr>
       <tr><td>Old version running</td><td>Plugin pins <code>agent-sidecar@&lt;version&gt;</code>. Update the plugin, restart Claude Code.</td></tr>
     </table>
   </main>

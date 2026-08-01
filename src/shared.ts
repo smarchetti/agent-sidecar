@@ -2,10 +2,11 @@
  * Shared vocabulary for the two halves of agent-sidecar: the singleton server
  * (one detached process per machine) and the per-session MCP client.
  */
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
-export const VERSION = '0.11.0'
+export const VERSION = '0.12.0'
 
 /**
  * Version of the client↔server HTTP contract (/api/sessions, /attach, /api/wait,
@@ -115,7 +116,7 @@ export interface Interaction {
 
 export async function readServerInfo(): Promise<ServerInfo | null> {
   try {
-    const info = (await Bun.file(SERVER_FILE).json()) as ServerInfo
+    const info = JSON.parse(await readFile(SERVER_FILE, 'utf8')) as ServerInfo
     return info.url && info.token ? info : null
   } catch {
     return null // no server has ever run here (or the file is mid-write)

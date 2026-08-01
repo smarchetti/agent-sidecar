@@ -7,7 +7,9 @@
  */
 import { mkdir } from 'node:fs/promises'
 import { openSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { basename, dirname, resolve } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import {
   PROTOCOL,
   SERVER_LOG,
@@ -31,12 +33,10 @@ const SPAWN_TIMEOUT_MS = 10_000
  */
 function spawnServer(entry: string) {
   const log = openSync(SERVER_LOG, 'a')
-  Bun.spawn([process.execPath, entry, '--serve'], {
+  spawn(process.execPath, [entry, '--serve'], {
     cwd: SIDECAR_HOME, // don't hold a project directory open
     env: process.env,
-    stdin: 'ignore',
-    stdout: log,
-    stderr: log,
+    stdio: ['ignore', log, log],
     detached: true,
   }).unref()
 }
@@ -73,7 +73,7 @@ export async function ensureServer(entry: string): Promise<ServerInfo> {
 
   const deadline = Date.now() + SPAWN_TIMEOUT_MS
   while (Date.now() < deadline) {
-    await Bun.sleep(100)
+    await sleep(100)
     const info = await readServerInfo()
     // wait for *our* successor, not the corpse of the one we just stopped
     const probe = info ? await probeServer(info.url) : null
@@ -93,7 +93,7 @@ async function stopServerAt(url: string, token: string): Promise<void> {
   }
   for (let i = 0; i < 30; i++) {
     if (!(await probeServer(url, 300))) return
-    await Bun.sleep(100)
+    await sleep(100)
   }
   // Still up after 3s. Fall through anyway: the server we spawn next sees it
   // alive on our protocol and exits, and we adopt the old one. A stale canvas
@@ -101,14 +101,20 @@ async function stopServerAt(url: string, token: string): Promise<void> {
 }
 
 /** Runs git in `cwd`, returning trimmed stdout — or null for any failure. */
-async function git(cwd: string, args: string[]): Promise<string | null> {
-  try {
-    const proc = Bun.spawn(['git', ...args], { cwd, stdout: 'pipe', stderr: 'ignore' })
-    const out = (await new Response(proc.stdout).text()).trim()
-    return (await proc.exited) === 0 && out ? out : null
-  } catch {
-    return null // git isn't installed
-  }
+function git(cwd: string, args: string[]): Promise<string | null> {
+  // `done`, not `resolve`: node:path's resolve() is in scope here too
+  return new Promise(done => {
+    try {
+      const proc = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'ignore'] })
+      let out = ''
+      proc.stdout.setEncoding('utf8')
+      proc.stdout.on('data', chunk => (out += chunk))
+      proc.on('error', () => done(null)) // git isn't installed
+      proc.on('close', code => done(code === 0 && out.trim() ? out.trim() : null))
+    } catch {
+      done(null)
+    }
+  })
 }
 
 /** Best-effort branch name, used as the session's label in the canvas. */
@@ -252,7 +258,7 @@ export class SessionLink {
         // server died or is restarting — fall through to recovery
       }
       if (this.closed) return
-      await Bun.sleep(backoffMs)
+      await sleep(backoffMs)
       backoffMs = Math.min(backoffMs * 2, 5_000)
       try {
         await this.recover()

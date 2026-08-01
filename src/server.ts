@@ -14,8 +14,14 @@
  * Machine-wide state:  ~/.agent-sidecar/{server.json,state.json,server.log}
  * Per-project state:   <cwd>/.sidecar/{session.json,interactions.jsonl}
  */
-import { appendFile, mkdir, rename, stat, truncate, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rename, stat, truncate, writeFile } from 'node:fs/promises'
 import { openSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { once } from 'node:events'
+import { Readable } from 'node:stream'
+import { setTimeout as sleep } from 'node:timers/promises'
+import type { AddressInfo } from 'node:net'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
@@ -130,7 +136,7 @@ function artifactSummary(a: Artifact): ArtifactSummary {
 async function loadState() {
   let saved: any
   try {
-    saved = await Bun.file(STATE_FILE).json()
+    saved = JSON.parse(await readFile(STATE_FILE, 'utf8'))
   } catch {
     return // first run
   }
@@ -638,7 +644,13 @@ function sseResponse(stream: ReadableStream) {
   })
 }
 
-async function handle(req: Request): Promise<Response> {
+/**
+ * `disconnected` is passed separately rather than read off `req.signal` because
+ * bun's node:http shim does not propagate RequestInit.signal onto the Request it
+ * builds. Session liveness hangs off this signal, so it has to be the one the
+ * adapter actually controls, on every runtime.
+ */
+async function handle(req: Request, disconnected: AbortSignal): Promise<Response> {
   const url = new URL(req.url)
   const path = url.pathname
 
@@ -679,7 +691,7 @@ async function handle(req: Request): Promise<Response> {
         }
         canvasClients.add(emit)
         noteActivity()
-        req.signal.addEventListener('abort', () => canvasClients.delete(emit))
+        disconnected.addEventListener('abort', () => canvasClients.delete(emit))
       },
     })
     return sseResponse(stream)
@@ -750,7 +762,7 @@ async function handle(req: Request): Promise<Response> {
               clearInterval(ping)
             }
           }, 25_000)
-          req.signal.addEventListener('abort', () => {
+          disconnected.addEventListener('abort', () => {
             clearInterval(ping)
             markDetached(session, handle)
           })
@@ -839,7 +851,7 @@ async function handle(req: Request): Promise<Response> {
     if (queued) return Response.json(queued)
 
     const timeoutSec = Number(url.searchParams.get('timeout')) || 0
-    const interaction = await waitForInteraction(session, artifactId, timeoutSec * 1000, req.signal)
+    const interaction = await waitForInteraction(session, artifactId, timeoutSec * 1000, disconnected)
     if (!interaction) return Response.json({ status: 'no_response' }, { status: 408 })
     return Response.json(interaction)
   }
@@ -944,7 +956,7 @@ function openBrowser(url: string): boolean {
         ? ['cmd', '/c', 'start', '', url]
         : ['xdg-open', url]
   try {
-    Bun.spawn(cmd, { stdout: 'ignore', stderr: 'ignore' })
+    spawn(cmd[0]!, cmd.slice(1), { stdio: 'ignore', detached: true }).unref()
     return true
   } catch {
     return false
@@ -955,10 +967,86 @@ function openBrowser(url: string): boolean {
 // Startup / shutdown
 // ---------------------------------------------------------------------------
 
-const serveOptions = {
-  hostname: '127.0.0.1', // localhost-only: nothing off this machine can reach it
-  idleTimeout: 0, // keep SSE streams open
-  fetch: handle,
+/**
+ * Adapts `handle` — a Web-standard (Request) => Response — onto node:http, which
+ * has no fetch-handler form of its own.
+ *
+ * The important part is the AbortController: `/attach` and `/events` learn that a
+ * client vanished by listening on `request.signal`, and that is how session
+ * liveness is detected at all. In node the equivalent event is the response
+ * closing, so the two are wired together here.
+ */
+function nodeHandler(nreq: IncomingMessage, nres: ServerResponse): void {
+  const aborter = new AbortController()
+  const disconnected = () => aborter.abort() // idempotent, so double-firing is fine
+  // Two listeners because the runtimes disagree: node emits response 'close' when
+  // a peer dies, bun's node:http shim emits only request 'aborted'. Miss this and
+  // sessions never go ended, which is the whole liveness mechanism.
+  nres.on('close', disconnected)
+  nreq.on('aborted', disconnected)
+  // small SSE frames should leave immediately rather than wait for Nagle
+  nres.socket?.setNoDelay(true)
+
+  void (async () => {
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(nreq.headers)) {
+      if (Array.isArray(value)) for (const v of value) headers.append(key, v)
+      else if (value != null) headers.set(key, value)
+    }
+    const hasBody = nreq.method !== 'GET' && nreq.method !== 'HEAD'
+    const request = new Request(`http://127.0.0.1:${PORT}${nreq.url ?? '/'}`, {
+      method: nreq.method,
+      headers,
+      body: hasBody ? (Readable.toWeb(nreq) as ReadableStream<Uint8Array>) : undefined,
+      duplex: hasBody ? 'half' : undefined,
+      signal: aborter.signal,
+    } as RequestInit & { duplex?: string })
+
+    let response: Response
+    try {
+      response = await handle(request, aborter.signal)
+    } catch (err) {
+      console.error('[sidecar] request failed:', err)
+      if (!nres.headersSent) nres.writeHead(500, { 'Content-Type': 'text/plain' })
+      nres.end('internal error')
+      return
+    }
+
+    if (aborter.signal.aborted) return
+    nres.writeHead(response.status, Object.fromEntries(response.headers))
+    if (!response.body) return void nres.end()
+
+    const reader = response.body.getReader()
+    aborter.signal.addEventListener('abort', () => void reader.cancel().catch(() => {}))
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        // an SSE stream can outrun a slow tab; wait rather than buffer forever
+        if (!nres.write(value)) await once(nres, 'drain', { signal: aborter.signal })
+      }
+      nres.end()
+    } catch {
+      nres.destroy() // client went away, or the stream errored mid-flight
+    }
+  })()
+}
+
+/** Resolves true once bound, false if the port is unavailable for any reason. */
+function listen(server: Server, port: number): Promise<boolean> {
+  return new Promise(done => {
+    const onError = () => {
+      server.removeListener('listening', onListening)
+      done(false)
+    }
+    const onListening = () => {
+      server.removeListener('error', onError)
+      done(true)
+    }
+    server.once('error', onError)
+    server.once('listening', onListening)
+    server.listen(port, '127.0.0.1') // localhost-only: nothing off this machine reaches it
+  })
 }
 
 /**
@@ -967,27 +1055,35 @@ const serveOptions = {
  * Anything else on the port — a foreign process, or a sidecar on an incompatible
  * protocol that we are deliberately coexisting with — just pushes us one higher.
  */
-async function bindPort() {
-  if (PREFERRED_PORT === 0) return Bun.serve({ ...serveOptions, port: 0 }) // tests / ephemeral
+async function bindPort(): Promise<Server> {
+  const server = createServer(nodeHandler)
+  // Long-polls and SSE streams are the product, not a hung request: node would
+  // otherwise cut both off at its 5-minute requestTimeout default.
+  server.requestTimeout = 0
+  server.headersTimeout = 0
+  server.timeout = 0
+  server.keepAliveTimeout = 72_000
+
+  if (PREFERRED_PORT === 0) {
+    await listen(server, 0) // tests / ephemeral
+    return server
+  }
   for (let port = PREFERRED_PORT; port <= PREFERRED_PORT + PORT_SCAN_RANGE; port++) {
-    try {
-      return Bun.serve({ ...serveOptions, port })
-    } catch (err) {
-      const held = await probeServer(`http://127.0.0.1:${port}`)
-      if (held?.protocol === PROTOCOL) {
-        console.error(`[sidecar] server already running on :${port} — nothing to do`)
-        process.exit(0)
-      }
-      const who = held ? `sidecar on protocol ${held.protocol}` : 'another process'
-      console.error(`[sidecar] port ${port} taken by ${who}, trying ${port + 1}`)
+    if (await listen(server, port)) return server
+    const held = await probeServer(`http://127.0.0.1:${port}`)
+    if (held?.protocol === PROTOCOL) {
+      console.error(`[sidecar] server already running on :${port} — nothing to do`)
+      process.exit(0)
     }
+    const who = held ? `sidecar on protocol ${held.protocol}` : 'another process'
+    console.error(`[sidecar] port ${port} taken by ${who}, trying ${port + 1}`)
   }
   throw new Error(
     `no free port in ${PREFERRED_PORT}-${PREFERRED_PORT + PORT_SCAN_RANGE} (set SIDECAR_PORT)`,
   )
 }
 
-let httpServer: ReturnType<typeof Bun.serve> | null = null
+let httpServer: Server | null = null
 
 /**
  * The newest client code any session has told us about, if it is ahead of us.
@@ -1018,16 +1114,16 @@ async function shutdown(code: number, successor?: string) {
   markServerStopped()
   // Release the port *before* spawning, or the successor loses the bind race to
   // a process that is about to exit anyway and scans itself onto a stray port.
-  httpServer?.stop(true)
+  // Held-open SSE sockets would keep close() pending, so drop them first.
+  httpServer?.closeAllConnections()
+  httpServer?.close()
   if (successor) {
     try {
       const log = openSync(SERVER_LOG, 'a')
-      Bun.spawn([process.execPath, successor, '--serve'], {
+      spawn(process.execPath, [successor, '--serve'], {
         cwd: SIDECAR_HOME,
         env: process.env,
-        stdin: 'ignore',
-        stdout: log,
-        stderr: log,
+        stdio: ['ignore', log, log],
         detached: true,
       }).unref()
     } catch (err) {
@@ -1081,7 +1177,7 @@ export async function runServer(): Promise<void> {
   await loadState()
 
   httpServer = await bindPort()
-  PORT = httpServer.port! // always set: we only ever bind TCP, never a unix socket
+  PORT = (httpServer.address() as AddressInfo).port // always TCP, never a unix socket
   BASE_URL = `http://127.0.0.1:${PORT}`
   // version is injected too, so the status bar reads right before the SSE snapshot lands
   canvasHtml = canvasTemplate
@@ -1131,7 +1227,7 @@ export async function stopServer(): Promise<string> {
       // server.json stays behind on purpose (see markServerStopped)
       return `Stopped sidecar server (pid ${info.pid}).`
     }
-    await Bun.sleep(100)
+    await sleep(100)
   }
   return `Server at ${info.url} did not stop; kill pid ${info.pid} manually.`
 }

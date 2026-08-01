@@ -1,6 +1,6 @@
 {
   "name": "agent-sidecar",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "A visual canvas for coding agents: your agent shows interactive HTML artifacts in your browser, and your clicks flow back into the conversation. MCP server.",
   "type": "module",
   "license": "MIT",
@@ -24,10 +24,12 @@
     "webhook"
   ],
   "engines": {
-    "bun": ">=1.2"
+    "node": ">=20"
   },
   "scripts": {
-    "build": "bun build src/sidecar.ts --target=bun --outfile=dist/sidecar.js",
+    "build": "bun build src/sidecar.ts --target=node --outfile=dist/sidecar.js",
+    "test": "bun test",
+    "test:node": "bun run build && SIDECAR_TEST_RUNTIME=node bun test",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {

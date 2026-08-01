@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * agent-sidecar — a visual canvas for coding agents.
  *
@@ -10,6 +10,7 @@
  *   agent-sidecar --stop     shut the singleton server down
  *   agent-sidecar --status   show the server and its sessions
  */
+import { fileURLToPath } from 'node:url'
 import { runMcp } from './mcp.ts'
 import { runServer, stopServer } from './server.ts'
 import { PROTOCOL, SIDECAR_HOME, VERSION, probeServer, readServerInfo } from './shared.ts'
@@ -103,7 +104,7 @@ if (flags.has('--version') || flags.has('-v')) {
 } else if (flags.has('--status')) {
   console.log(await status())
 } else {
-  // import.meta.path is this entry (src/sidecar.ts in dev, dist/sidecar.js when
-  // installed) — the client re-launches it with --serve to start the server
-  await runMcp(import.meta.path)
+  // this entry's own path (src/sidecar.ts in dev, dist/sidecar.js when installed)
+  // — the client re-launches it with --serve to start the server
+  await runMcp(fileURLToPath(import.meta.url))
 }

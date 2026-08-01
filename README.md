@@ -16,12 +16,15 @@ agent-sidecar is an MCP server plus a local canvas server, packaged as a Claude 
 
 ## Quick start
 
-Requires [Bun](https://bun.sh) on your PATH. In any Claude Code session:
+Requires Node 20+ on your PATH — nothing else. In any Claude Code session:
 
 ```
 /plugin marketplace add smarchetti/agent-sidecar
 /plugin install agent-sidecar@agent-sidecar
 ```
+
+The plugin ships its own bundle and runs it in place, so installing touches no
+registry and works offline.
 
 Restart Claude Code, then ask for something visual: *"show me three layout options for a pricing page on the canvas."* The browser opens, the artifact renders, and clicking it answers Claude.
 
@@ -30,8 +33,11 @@ Restart Claude Code, then ask for something visual: *"show me three layout optio
 agent-sidecar is a standard MCP stdio server, so any MCP client can run it — the plugin is just Claude Code packaging. Point your agent at:
 
 ```json
-{ "mcpServers": { "agent-sidecar": { "command": "bunx", "args": ["agent-sidecar"] } } }
+{ "mcpServers": { "agent-sidecar": { "command": "npx", "args": ["-y", "agent-sidecar"] } } }
 ```
+
+On a locked-down network, `npm i -g agent-sidecar` once and use
+`{ "command": "agent-sidecar" }` instead — that skips the registry on every launch.
 
 | Agent | Config file |
 | --- | --- |
@@ -75,10 +81,12 @@ A status bar along the bottom reports the connection, the server address, live/t
 The server outlives your agent sessions, and exits on its own after 30 minutes with no sessions and no open canvas tab. To manage it directly:
 
 ```bash
-bunx agent-sidecar --status   # server, sessions, artifact counts
-bunx agent-sidecar --stop     # shut it down
-bunx agent-sidecar --serve    # run it in the foreground (debugging)
+npx agent-sidecar --status   # server, sessions, artifact counts
+npx agent-sidecar --stop     # shut it down
+npx agent-sidecar --serve    # run it in the foreground (debugging)
 ```
+
+(Installed as a plugin, the same commands are `node ~/.claude/plugins/cache/agent-sidecar/agent-sidecar/*/dist/sidecar.js --status`.)
 
 ## Reference (short version)
 
@@ -106,13 +114,14 @@ Localhost-only binding; a random token (stored `0600` in `~/.agent-sidecar/serve
 
 ```bash
 bun install
-bun test                              # 38 end-to-end tests over real MCP stdio
+bun test                              # 55 end-to-end tests over real MCP stdio
+bun run test:node                     # the same suite against the built bundle under node
 claude --mcp-config dev.mcp.json      # run your working copy live (disable the plugin first)
 ```
 
-Tests run against an isolated server (`SIDECAR_HOME` + a random port), so they never touch the one you're using.
+Bun is the tooling, not the runtime: `src/` uses only `node:` builtins so the shipped bundle runs under plain Node, and CI runs the suite both ways. Tests run against an isolated server (`SIDECAR_HOME` + a random port), so they never touch the one you're using.
 
-Source: `src/sidecar.ts` (CLI entry) · `src/server.ts` (the singleton canvas server) · `src/client.ts` (server discovery + session link) · `src/mcp.ts` (the tools) · `src/shared.ts` (paths and types) · `src/canvas.html` (the browser shell, inlined into the bundle). Releases: bump `package.json`, the `agent-sidecar@<version>` pin in `.claude-plugin/plugin.json`, and CHANGELOG, then push and tag `vX.Y.Z` — GitHub Actions tests, publishes to npm with provenance, and cuts the release.
+Source: `src/sidecar.ts` (CLI entry) · `src/server.ts` (the singleton canvas server) · `src/client.ts` (server discovery + session link) · `src/mcp.ts` (the tools) · `src/shared.ts` (paths and types) · `src/canvas.html` (the browser shell, inlined into the bundle). `dist/sidecar.js` is committed, because the plugin runs it in place out of the plugin directory — rebuild it in any commit touching `src/`, or CI will fail. Releases: bump `version` in `package.json`, `.claude-plugin/plugin.json`, and `VERSION` in `src/shared.ts`, retitle the CHANGELOG section, `bun run build`, then push and tag `vX.Y.Z` — GitHub Actions tests, publishes to npm with provenance, and cuts the release.
 
 ## License
 

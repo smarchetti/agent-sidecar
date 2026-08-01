@@ -6,7 +6,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const REPO = join(import.meta.dir, '..')
-const SERVER = join(REPO, 'src', 'sidecar.ts')
+
+/**
+ * What actually runs the sidecar under test. The default exercises the working
+ * source under bun; SIDECAR_TEST_RUNTIME=node exercises the built bundle under
+ * node, which is what ships — the two runtimes have already disagreed about
+ * node:http disconnect events, so both legs earn their keep.
+ */
+const RUNTIME = process.env.SIDECAR_TEST_RUNTIME === 'node' ? 'node' : 'bun'
+const SERVER =
+  RUNTIME === 'node' ? join(REPO, 'dist', 'sidecar.js') : join(REPO, 'src', 'sidecar.ts')
 
 // Every run gets its own machine-wide home + port so it never touches the
 // developer's real server (or a parallel test run).
@@ -42,7 +51,7 @@ interface Health {
 function makeClient(cwd: string, env: Record<string, string> = ENV) {
   const client = new Client({ name: 'test', version: '0.0.1' })
   const connected = client.connect(
-    new StdioClientTransport({ command: 'bun', args: [SERVER], cwd, env, stderr: 'pipe' }),
+    new StdioClientTransport({ command: RUNTIME, args: [SERVER], cwd, env, stderr: 'pipe' }),
   )
   return { client, connected }
 }
@@ -67,7 +76,7 @@ async function cli(...args: string[]) {
 }
 
 async function cliIn(env: Record<string, string>, ...args: string[]) {
-  const proc = Bun.spawn(['bun', SERVER, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
+  const proc = Bun.spawn([RUNTIME, SERVER, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
   const out = await new Response(proc.stdout).text()
   await proc.exited
   return out
