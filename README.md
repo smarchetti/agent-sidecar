@@ -84,7 +84,7 @@ bunx agent-sidecar --serve    # run it in the foreground (debugging)
 
 **MCP tools** — `create_artifact`, `update_artifact`, `await_interaction` (blocking, `artifact_id` filter), `get_interactions` (drain), `list_artifacts`, `remove_artifact`.
 
-**HTTP** — `GET /` canvas · `GET /events` SSE · `GET /artifact/:id` · `POST /api/webhook` (token) · `GET /api/wait?session=…` long-poll (token) · `GET /health`.
+**HTTP** — `GET /` canvas · `GET /events` SSE · `GET /artifact/:id` · `POST /api/webhook` (token) · `GET /api/wait?session=…` long-poll (token) · `POST /api/restart` (token) · `GET /health`.
 
 **Files** — machine-wide state in `~/.agent-sidecar/` (`server.json` coordinates, `state.json` canvas contents, `server.log`); per-project state in `.sidecar/` (`session.json` coordinates for external callers, `interactions.jsonl`). Env: `SIDECAR_PORT` (default 8765), `SIDECAR_HOME`, `SIDECAR_IDLE_EXIT_MS`.
 

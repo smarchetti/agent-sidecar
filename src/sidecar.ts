@@ -12,13 +12,15 @@
  */
 import { runMcp } from './mcp.ts'
 import { runServer, stopServer } from './server.ts'
-import { SIDECAR_HOME, VERSION, isServerAlive, readServerInfo } from './shared.ts'
+import { PROTOCOL, SIDECAR_HOME, VERSION, probeServer, readServerInfo } from './shared.ts'
 
 interface SessionRow {
   id: string
   project: string
   origin?: { repo: string; worktree: string; worktreeIsMain: boolean }
   label: string
+  /** What this session's client is running — not necessarily the server's version. */
+  version?: string | null
   live: boolean
   queued: number
   artifacts: unknown[]
@@ -40,12 +42,19 @@ function ago(iso: string): string {
 
 async function status(): Promise<string> {
   const info = await readServerInfo()
-  if (!info || !(await isServerAlive(info.url))) {
-    return `agent-sidecar ${VERSION}\nserver    not running (state in ${SIDECAR_HOME})`
+  const probe = info ? await probeServer(info.url) : null
+  if (!info || !probe) {
+    return (
+      `agent-sidecar ${VERSION} (protocol ${PROTOCOL})\n` +
+      `server    not running (state in ${SIDECAR_HOME})`
+    )
   }
+  // the running server can legitimately be a different release from this CLI
+  const drift = probe.version === VERSION ? '' : `  ← this CLI is ${VERSION}`
   const lines = [
-    `agent-sidecar ${VERSION}`,
-    `server    running · pid ${info.pid} · ${info.url} · up ${ago(info.startedAt)}`,
+    `agent-sidecar ${VERSION} (protocol ${PROTOCOL})`,
+    `server    running v${probe.version} · protocol ${probe.protocol} · pid ${info.pid} · ` +
+      `${info.url} · up ${ago(info.startedAt)}${drift}`,
   ]
   try {
     const res = await fetch(`${info.url}/api/sessions`, {
@@ -56,8 +65,10 @@ async function status(): Promise<string> {
     lines.push(`sessions  ${live} live, ${sessions.length - live} ended`)
     for (const s of sessions) {
       const queued = s.queued ? `, ${s.queued} queued` : ''
+      // only worth printing when it disagrees with the server it is attached to
+      const ver = s.version && s.version !== probe.version ? ` · client v${s.version}` : ''
       lines.push(
-        `  ${s.live ? '●' : '○'} ${s.id}  ${where(s)} · ${s.label}  ` +
+        `  ${s.live ? '●' : '○'} ${s.id}  ${where(s)} · ${s.label}${ver}  ` +
           `(${s.artifacts.length} artifact(s)${queued})`,
       )
     }

@@ -39,10 +39,10 @@ interface Health {
   canvasTabs: number
 }
 
-function makeClient(cwd: string) {
+function makeClient(cwd: string, env: Record<string, string> = ENV) {
   const client = new Client({ name: 'test', version: '0.0.1' })
   const connected = client.connect(
-    new StdioClientTransport({ command: 'bun', args: [SERVER], cwd, env: ENV, stderr: 'pipe' }),
+    new StdioClientTransport({ command: 'bun', args: [SERVER], cwd, env, stderr: 'pipe' }),
   )
   return { client, connected }
 }
@@ -63,7 +63,11 @@ const text = (r: any): string => r.content[0].text
 const health = async (): Promise<Health> => (await (await fetch(`${base}/health`)).json()) as Health
 
 async function cli(...args: string[]) {
-  const proc = Bun.spawn(['bun', SERVER, ...args], { env: ENV, stdout: 'pipe', stderr: 'pipe' })
+  return cliIn(ENV, ...args)
+}
+
+async function cliIn(env: Record<string, string>, ...args: string[]) {
+  const proc = Bun.spawn(['bun', SERVER, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
   const out = await new Response(proc.stdout).text()
   await proc.exited
   return out
@@ -699,6 +703,205 @@ describe('repo and worktree grouping', () => {
     expect(out).toContain('widgets/widgets-feat-tree · feat/tree')
     expect(out).toContain('widgets · main')
   })
+})
+
+describe('version skew', () => {
+  test('/health advertises the protocol and whether it is idle', async () => {
+    const h = (await health()) as Health & { protocol: number; idle: boolean }
+    expect(h.protocol).toBe(1)
+    // our own session is attached, so it is not idle
+    expect(h.idle).toBe(false)
+  })
+
+  test('a session reports the version of the client half, not just the server', async () => {
+    const res = await fetch(`${base}/api/sessions`, {
+      headers: { 'X-Sidecar-Token': session.token },
+    })
+    const { sessions } = (await res.json()) as {
+      sessions: { id: string; version: string; protocol: number }[]
+    }
+    const mineRow = sessions.find(s => s.id === session.sessionId)!
+    expect(mineRow.version).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(mineRow.protocol).toBe(1)
+  })
+
+  test('the entry path is persisted so the server can restart into newer code', async () => {
+    const state = (await Bun.file(join(HOME, 'state.json')).json()) as {
+      sessions: { id: string; entry: string }[]
+    }
+    const saved = state.sessions.find(s => s.id === session.sessionId)
+    expect(saved?.entry).toBe(realpathSync(SERVER))
+  })
+
+  test('/api/restart refuses when no session is running anything newer', async () => {
+    const res = await fetch(`${base}/api/restart`, {
+      method: 'POST',
+      headers: { 'X-Sidecar-Token': session.token },
+    })
+    expect(res.status).toBe(409)
+    expect(((await res.json()) as { reason: string }).reason).toContain('newer than')
+  })
+
+  test('--status reports the protocol alongside the version', async () => {
+    expect(await cli('--status')).toContain('protocol 1')
+  })
+})
+
+/**
+ * Adoption is the interesting decision a starting client makes, and it can only
+ * be exercised against a server claiming to be a different release — so these
+ * stand one up. Their own home and port: they move server.json around, which the
+ * shared server above must never see.
+ */
+describe('adopting an existing server', () => {
+  const SKEW_HOME = mkdtempSync(join(tmpdir(), 'sidecar-skew-'))
+  const SKEW_PORT = String(49_900 + Math.floor(Math.random() * 80))
+  const SKEW_ENV = {
+    ...process.env,
+    SIDECAR_HOME: SKEW_HOME,
+    SIDECAR_PORT: SKEW_PORT,
+    SIDECAR_IDLE_EXIT_MS: '0',
+  } as Record<string, string>
+
+  /** Enough of a sidecar server for a client to discover, probe, and attach to. */
+  function fakeServer(opts: { version: string; idle: boolean }) {
+    const seen = { shutdowns: 0, registrations: 0 }
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      idleTimeout: 0,
+      fetch(req): Response {
+        const path = new URL(req.url).pathname
+        if (path === '/health') {
+          return Response.json({
+            ok: true,
+            server: 'agent-sidecar',
+            version: opts.version,
+            protocol: 1,
+            pid: 999_999,
+            idle: opts.idle,
+            sessions: { live: opts.idle ? 0 : 1, total: 1 },
+            canvasTabs: 0,
+          })
+        }
+        if (path === '/api/shutdown') {
+          seen.shutdowns++
+          // a real server exits here; going quiet is what the client waits for
+          setTimeout(() => server.stop(true), 10)
+          return Response.json({ ok: true })
+        }
+        if (path === '/api/sessions' && req.method === 'POST') {
+          seen.registrations++
+          const origin = new URL(req.url).origin
+          return Response.json({ sessionId: 's99-fake', url: origin, version: opts.version })
+        }
+        if (path.endsWith('/attach')) {
+          const stream = new ReadableStream({
+            start: ctrl => ctrl.enqueue(': ping\n\n'), // held open, never closed
+          })
+          return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } })
+        }
+        return new Response('not found', { status: 404 })
+      },
+    })
+    const base = `http://127.0.0.1:${server.port}`
+    mkdirSync(SKEW_HOME, { recursive: true })
+    Bun.write(
+      join(SKEW_HOME, 'server.json'),
+      JSON.stringify({
+        server: 'agent-sidecar',
+        version: opts.version,
+        protocol: 1,
+        pid: 999_999,
+        port: server.port,
+        url: base,
+        token: 'f'.repeat(32),
+        startedAt: new Date().toISOString(),
+      }),
+    )
+    return { server, seen, url: base }
+  }
+
+  test('replaces an older server that nobody is watching', async () => {
+    const fake = fakeServer({ version: '0.0.1', idle: true })
+    const project = mkdtempSync(join(tmpdir(), 'sidecar-skew-idle-'))
+    const c = makeClient(project, SKEW_ENV)
+    try {
+      await c.connected
+      const s = await readSessionFile(project)
+      // it stopped the stale one and came up on our own configured port
+      expect(fake.seen.shutdowns).toBe(1)
+      expect(fake.seen.registrations).toBe(0)
+      expect(s.port).toBe(Number(SKEW_PORT))
+      expect(s.url).not.toBe(fake.url)
+    } finally {
+      await c.client.close().catch(() => {})
+      await cliIn(SKEW_ENV, '--stop')
+      fake.server.stop(true)
+    }
+  }, 30_000)
+
+  test('/api/restart hands the canvas to the newest entry a session reported', async () => {
+    const project = mkdtempSync(join(tmpdir(), 'sidecar-skew-restart-'))
+    const c = makeClient(project, SKEW_ENV)
+    try {
+      await c.connected
+      const s = await readSessionFile(project)
+      const auth = { 'X-Sidecar-Token': s.token, 'Content-Type': 'application/json' }
+
+      // stand in for a second harness that pinned a newer release; `entry` is the
+      // real one, so the successor it launches is code that actually runs
+      await fetch(`${s.url}/api/sessions`, {
+        method: 'POST',
+        headers: auth,
+        body: JSON.stringify({
+          cwd: project,
+          label: 'future',
+          version: '99.0.0',
+          protocol: 1,
+          entry: realpathSync(SERVER),
+        }),
+      })
+
+      const before = ((await (await fetch(`${s.url}/health`)).json()) as Health).pid
+      const res = await fetch(`${s.url}/api/restart`, { method: 'POST', headers: auth })
+      expect(res.status).toBe(200)
+      expect((await res.json()) as { to: string }).toMatchObject({ ok: true, to: '99.0.0' })
+
+      // the successor takes the same port, so the canvas URL never moves
+      let after = before
+      for (let i = 0; i < 100 && after === before; i++) {
+        await Bun.sleep(100)
+        after = await fetch(`${s.url}/health`)
+          .then(r => r.json() as Promise<Health>)
+          .then(h => h.pid)
+          .catch(() => before)
+      }
+      expect(after).not.toBe(before)
+      expect(Number(new URL(s.url).port)).toBe(Number(SKEW_PORT))
+    } finally {
+      await c.client.close().catch(() => {})
+      await cliIn(SKEW_ENV, '--stop')
+    }
+  }, 30_000)
+
+  test('adopts an older server that has something attached', async () => {
+    const fake = fakeServer({ version: '0.0.1', idle: false })
+    const project = mkdtempSync(join(tmpdir(), 'sidecar-skew-busy-'))
+    const c = makeClient(project, SKEW_ENV)
+    try {
+      await c.connected
+      const s = await readSessionFile(project)
+      // left alone: restarting it would have been visible to whoever is attached
+      expect(fake.seen.shutdowns).toBe(0)
+      expect(fake.seen.registrations).toBeGreaterThan(0)
+      expect(s.sessionId).toBe('s99-fake')
+      expect(s.url).toBe(fake.url)
+    } finally {
+      await c.client.close().catch(() => {})
+      fake.server.stop(true)
+    }
+  }, 30_000)
 })
 
 describe('cli', () => {

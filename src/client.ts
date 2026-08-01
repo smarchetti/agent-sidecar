@@ -9,10 +9,13 @@ import { mkdir } from 'node:fs/promises'
 import { openSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'
 import {
+  PROTOCOL,
   SERVER_LOG,
   SIDECAR_HOME,
-  isServerAlive,
+  VERSION,
+  compareVersions,
   originFromCwd,
+  probeServer,
   readServerInfo,
   repoNameFromRemote,
   type ServerInfo,
@@ -42,10 +45,28 @@ function spawnServer(entry: string) {
  * Returns a live server, starting one if needed. Concurrent MCP starts are safe:
  * every loser of the bind race exits on its own, and all clients converge on the
  * winner recorded in server.json.
+ *
+ * Adopting a server of a *different package version* is the normal case, not a
+ * fault — each harness pins its own client, and the HTTP contract between the two
+ * halves is versioned separately (PROTOCOL). The one exception is below.
  */
 export async function ensureServer(entry: string): Promise<ServerInfo> {
   const existing = await readServerInfo()
-  if (existing && (await isServerAlive(existing.url))) return existing
+  const running = existing ? await probeServer(existing.url) : null
+
+  if (existing && running) {
+    // A server older than us that nobody is watching can be replaced without
+    // anyone seeing it happen — this is the plain "upgrade, restart your editor,
+    // start a session" path. If anything is attached or a canvas tab is open we
+    // adopt it instead and let the user decide; the canvas offers them a restart.
+    const stale = compareVersions(running.version, VERSION) < 0
+    if (!(stale && running.idle)) return existing
+
+    console.error(
+      `[sidecar] replacing idle server ${running.version} (pid ${running.pid}) with ${VERSION}`,
+    )
+    await stopServerAt(existing.url, existing.token)
+  }
 
   await mkdir(SIDECAR_HOME, { recursive: true })
   spawnServer(entry)
@@ -54,11 +75,29 @@ export async function ensureServer(entry: string): Promise<ServerInfo> {
   while (Date.now() < deadline) {
     await Bun.sleep(100)
     const info = await readServerInfo()
-    if (info && (await isServerAlive(info.url))) return info
+    // wait for *our* successor, not the corpse of the one we just stopped
+    const probe = info ? await probeServer(info.url) : null
+    if (info && probe?.protocol === PROTOCOL) return info
   }
   throw new Error(
     `sidecar server did not come up within ${SPAWN_TIMEOUT_MS / 1000}s — see ${SERVER_LOG}`,
   )
+}
+
+/** Ask a server to exit and wait for it to let go of its port. */
+async function stopServerAt(url: string, token: string): Promise<void> {
+  try {
+    await fetch(`${url}/api/shutdown`, { method: 'POST', headers: { 'X-Sidecar-Token': token } })
+  } catch {
+    // it may die before the response lands — that's the intended outcome
+  }
+  for (let i = 0; i < 30; i++) {
+    if (!(await probeServer(url, 300))) return
+    await Bun.sleep(100)
+  }
+  // Still up after 3s. Fall through anyway: the server we spawn next sees it
+  // alive on our protocol and exits, and we adopt the old one. A stale canvas
+  // beats no canvas, and the update bar still offers the user a restart.
 }
 
 /** Runs git in `cwd`, returning trimmed stdout — or null for any failure. */
@@ -182,6 +221,11 @@ export class SessionLink {
         label: this.label,
         pid: process.pid,
         origin: this.origin,
+        // the server shows these next to the session and uses `entry` to find
+        // newer code when the user asks it to restart into it
+        version: VERSION,
+        protocol: PROTOCOL,
+        entry: this.entry,
       }),
     })
     if (!res.ok) throw new Error(`could not register session: ${res.status} ${await res.text()}`)

@@ -367,7 +367,8 @@ bunx agent-sidecar --serve    <span class="c"># run in the foreground (debugging
       <tr><td><code>GET /api/drain</code></td><td>token</td><td>Returns and clears everything queued for <code>?session=</code> without blocking</td></tr>
       <tr><td><code>GET /api/sessions</code></td><td>token</td><td>Every session with its label, liveness, and artifacts</td></tr>
       <tr><td><code>POST /api/shutdown</code></td><td>token</td><td>Stop the server (what <code>--stop</code> calls)</td></tr>
-      <tr><td><code>GET /health</code></td><td>—</td><td><code>{ ok, server, version, pid, port, sessions, artifacts, canvasTabs, queuedInteractions }</code></td></tr>
+      <tr><td><code>POST /api/restart</code></td><td>token</td><td>Hand the canvas to the newest version any session has registered from, reusing the same port. <code>409</code> when nothing newer is attached. This is what the canvas's update bar calls</td></tr>
+      <tr><td><code>GET /health</code></td><td>—</td><td><code>{ ok, server, version, protocol, pid, port, idle, sessions, artifacts, canvasTabs, queuedInteractions }</code></td></tr>
     </table>
 
     <h2 id="send">claude.send()</h2>

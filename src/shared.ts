@@ -8,12 +8,32 @@ import { basename, join } from 'node:path'
 export const VERSION = '0.11.0'
 
 /**
+ * Version of the client↔server HTTP contract (/api/sessions, /attach, /api/wait,
+ * /api/webhook, /events), which is a different thing from the package version.
+ *
+ * Package versions move every release; this moves only when that surface breaks.
+ * That distinction is the point: a 0.11 client and a 0.12 server share a canvas
+ * quite happily, so releases don't have to disturb a running server. Bump this
+ * only when an older client genuinely cannot talk to a newer server.
+ */
+export const PROTOCOL = 1
+
+/**
  * Machine-wide state dir. The server is a singleton across every project, so
  * its discovery file and canvas state live here rather than in any one repo.
  * SIDECAR_HOME lets tests (and power users) run an isolated server.
  */
 export const SIDECAR_HOME = process.env.SIDECAR_HOME || join(homedir(), '.agent-sidecar')
-export const SERVER_FILE = join(SIDECAR_HOME, 'server.json')
+
+/**
+ * Discovery file, scoped to the protocol so incompatible servers can coexist
+ * rather than fight over one port and one file. Protocol 1 keeps the historical
+ * `server.json` name, so upgrading from a pre-protocol build finds its own server.
+ */
+export const SERVER_FILE = join(
+  SIDECAR_HOME,
+  PROTOCOL === 1 ? 'server.json' : `server-p${PROTOCOL}.json`,
+)
 export const STATE_FILE = join(SIDECAR_HOME, 'state.json')
 export const SERVER_LOG = join(SIDECAR_HOME, 'server.log')
 
@@ -28,6 +48,8 @@ export const PREFERRED_PORT = Number(process.env.SIDECAR_PORT ?? 8765)
 export interface ServerInfo {
   server: 'agent-sidecar'
   version: string
+  /** Absent in files written before protocol versioning existed; treat as 1. */
+  protocol?: number
   pid: number
   port: number
   url: string
@@ -100,15 +122,60 @@ export async function readServerInfo(): Promise<ServerInfo | null> {
   }
 }
 
-/** True if something at this URL is a live agent-sidecar server. */
-export async function isServerAlive(url: string, timeoutMs = 1500): Promise<boolean> {
+/** What /health tells a client about the server it just found. */
+export interface ServerProbe {
+  version: string
+  protocol: number
+  /** True when nothing is attached and no canvas tab is open — safe to replace unseen. */
+  idle: boolean
+  liveSessions: number
+  canvasTabs: number
+  pid: number
+}
+
+/**
+ * Ask whoever holds this URL what they are. Returns null for "not a live
+ * agent-sidecar", which covers a dead server, a foreign process on the port,
+ * and a connection that never answers.
+ */
+export async function probeServer(url: string, timeoutMs = 1500): Promise<ServerProbe | null> {
   try {
     const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) })
-    if (!res.ok) return false
-    return ((await res.json()) as { server?: string }).server === 'agent-sidecar'
+    if (!res.ok) return null
+    const h = (await res.json()) as Record<string, any>
+    if (h.server !== 'agent-sidecar') return null
+    return {
+      version: typeof h.version === 'string' ? h.version : '0.0.0',
+      // a pre-protocol server reports nothing; it spoke protocol 1 by definition
+      protocol: typeof h.protocol === 'number' ? h.protocol : 1,
+      idle: h.idle === true,
+      liveSessions: h.sessions?.live ?? 0,
+      canvasTabs: h.canvasTabs ?? 0,
+      pid: h.pid ?? 0,
+    }
   } catch {
-    return false
+    return null
   }
+}
+
+/** True if something at this URL is a live agent-sidecar server. */
+export async function isServerAlive(url: string, timeoutMs = 1500): Promise<boolean> {
+  return (await probeServer(url, timeoutMs)) !== null
+}
+
+/**
+ * `a` vs `b` as dotted numeric versions: -1, 0, or 1. Prerelease suffixes are
+ * dropped rather than ordered — we only need "is the running server behind us",
+ * and treating 0.12.0-rc1 as 0.12.0 errs toward leaving it alone.
+ */
+export function compareVersions(a: string, b: string): number {
+  const parts = (v: string) => v.split('-')[0]!.split('.').map(n => Number(n) || 0)
+  const [x, y] = [parts(a), parts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return 0
 }
 
 /** Renders an interaction the way Claude reads it back in a tool result. */

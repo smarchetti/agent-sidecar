@@ -261,6 +261,11 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex: 1; min-width: 0;
   }
+  /* Rendered only when this session's client disagrees with the server — the
+     difference between "the canvas is stale" and "this agent is". */
+  .session-main .ver {
+    flex: none; font: var(--t-xs) var(--font-mono); color: var(--text-faint);
+  }
   .session.selected .label { color: var(--accent-hot); }
   .session-main .count {
     font: 400 var(--t-xs) var(--font-sans); color: var(--text-faint); flex: none;
@@ -380,6 +385,41 @@
   }
   #mode-switch svg { display: block; }
   @media (prefers-reduced-motion: reduce) { #mode-switch button { transition: none; } }
+
+  /* ------------------------------------------------------------- update bar */
+  /* Only appears when a session is running newer code than the server. Restarting
+     is always safe — state persists and clients re-attach — but it is visible, so
+     this asks instead of acting. A hairline strip, not a modal. */
+  #update-bar {
+    flex: none; display: flex; align-items: center; gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    border-bottom: 1px solid var(--accent-edge);
+    background: var(--accent-wash);
+    font-size: var(--t-sm);
+  }
+  #update-bar[hidden] { display: none; }
+  #update-bar .text { flex: 1; min-width: 0; }
+  #update-bar .v { font-family: var(--font-mono); font-size: var(--t-xs); }
+  #update-bar .detail { color: var(--text-dim); }
+  #update-bar #update-restart {
+    flex: none; padding: var(--s-1) var(--s-3);
+    background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: var(--r-sm); cursor: pointer;
+    font: 600 var(--t-sm)/1.7 var(--font-sans);
+    transition: background .15s;
+  }
+  #update-bar #update-restart:hover { background: var(--accent-hot); }
+  #update-bar #update-restart:disabled { opacity: .55; cursor: default; }
+  #update-bar .dismiss {
+    flex: none; padding: 0 var(--s-1);
+    background: none; border: 0; cursor: pointer;
+    color: var(--text-faint); font-size: 15px; line-height: 1;
+    transition: color .15s;
+  }
+  #update-bar .dismiss:hover { color: var(--text); }
+  @media (prefers-reduced-motion: reduce) {
+    #update-bar #update-restart, #update-bar .dismiss { transition: none; }
+  }
 
   /* Single mode gives the artifact the whole stage, edge to edge — no frame of
      our own around it. Only the timeline needs cards, because it stacks many. */
@@ -569,6 +609,13 @@
       <a class="tool-btn" id="btn-open" href="#" target="_blank" rel="noopener" title="Open this artifact in a new tab" aria-label="Open this artifact in a new tab" aria-disabled="true">↗</a>
     </div>
 
+    <!-- shown by renderUpdateBar() when a session is running newer code than the server -->
+    <div id="update-bar" role="status" hidden>
+      <span class="text"></span>
+      <button type="button" id="update-restart">Restart server</button>
+      <button type="button" class="dismiss" id="update-dismiss" title="Dismiss until the next version" aria-label="Dismiss update notice">×</button>
+    </div>
+
     <div id="stage">
       <div id="placeholder">
         <div class="logo">✳</div>
@@ -632,6 +679,10 @@
   const sbArtifacts = el('sb-artifacts')
   const sbQueued = el('sb-queued')
   const sbVersion = el('sb-version')
+  const updateBar = el('update-bar')
+  const updateText = updateBar.querySelector('.text')
+  const updateRestart = el('update-restart')
+  const updateDismiss = el('update-dismiss')
   const toast = el('toast')
   const noteInput = el('note-input')
   const noteSend = el('note-send')
@@ -654,6 +705,14 @@
     // storage unavailable — start in single mode
   }
   let serverInfo = null
+  /** newest version the user has waved off, so the bar returns for the release after it */
+  let dismissedUpdate = null
+  try {
+    dismissedUpdate = localStorage.getItem('sidecar:dismissedUpdate')
+  } catch {
+    // storage unavailable — the bar just reappears on reload
+  }
+  let restarting = false
   let toastAction = null
 
   const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -890,13 +949,22 @@
     main.type = 'button'
     main.className = 'session-main'
     main.setAttribute('aria-pressed', String(isSelected))
-    main.title = s.live ? `${s.id} · live` : `${s.id} · ended ${fmtTime(s.endedAt)}`
+    main.title =
+      (s.live ? `${s.id} · live` : `${s.id} · ended ${fmtTime(s.endedAt)}`) +
+      (s.version ? ` · client v${s.version}` : '')
     const dot = document.createElement('span')
     dot.className = 'dot'
     const label = document.createElement('span')
     label.className = 'label'
     label.textContent = s.label
     main.append(dot, label)
+    const serverVersion = serverInfo && serverInfo.version
+    if (s.version && serverVersion && s.version !== serverVersion) {
+      const ver = document.createElement('span')
+      ver.className = 'ver'
+      ver.textContent = 'v' + s.version
+      main.appendChild(ver)
+    }
     main.addEventListener('click', () => {
       expanded.add(s.id)
       selectSession(s.id)
@@ -1044,13 +1112,90 @@
     sbQueued.textContent = `${plural(queued, 'reply')} queued`
     sbQueued.title = 'sent, waiting for your agent to read it'
     sbVersion.textContent = 'v' + ((serverInfo && serverInfo.version) || BUILD_VERSION)
+    sbVersion.title = serverInfo && serverInfo.protocol
+      ? `canvas server v${serverInfo.version} · client protocol ${serverInfo.protocol}`
+      : ''
   }
+
+  /** Dotted numeric compare; matches compareVersions() on the server. */
+  function cmpVersions(a, b) {
+    const parts = v => String(v).split('-')[0].split('.').map(n => Number(n) || 0)
+    const [x, y] = [parts(a), parts(b)]
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      const d = (x[i] || 0) - (y[i] || 0)
+      if (d !== 0) return d < 0 ? -1 : 1
+    }
+    return 0
+  }
+
+  /**
+   * The server and the sessions on it can legitimately run different versions —
+   * each harness pins its own client — so a mismatch is reported, not corrected.
+   * We only offer a restart when a live session is actually *ahead* of the server.
+   */
+  function newestClientVersion() {
+    let best = null
+    for (const s of sessions.values()) {
+      if (!s.live || !s.version) continue
+      if (!best || cmpVersions(s.version, best) > 0) best = s.version
+    }
+    return best
+  }
+
+  function renderUpdateBar() {
+    const server = serverInfo && serverInfo.version
+    const newest = newestClientVersion()
+    const behind = server && newest && cmpVersions(newest, server) > 0
+    if (!behind || dismissedUpdate === newest) {
+      updateBar.hidden = true
+      return
+    }
+    const live = [...sessions.values()].filter(s => s.live).length
+    updateText.innerHTML =
+      `Server is on <span class="v">v${server}</span>, a session is running ` +
+      `<span class="v">v${newest}</span>. ` +
+      `<span class="detail">Restarting reconnects ${plural(live, 'live session')} automatically.</span>`
+    updateRestart.disabled = restarting
+    updateRestart.textContent = restarting ? 'Restarting…' : `Restart into v${newest}`
+    updateBar.hidden = false
+  }
+
+  updateRestart.addEventListener('click', async () => {
+    restarting = true
+    renderUpdateBar()
+    try {
+      const res = await fetch('/api/restart', {
+        method: 'POST',
+        headers: { 'X-Sidecar-Token': TOKEN },
+      })
+      // the successor comes up on the same port; EventSource reconnects into it
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        restarting = false
+        updateText.textContent = body.reason || 'Could not restart the server.'
+        updateRestart.disabled = true
+      }
+    } catch {
+      // the server usually dies before the response lands — that is success
+    }
+  })
+
+  updateDismiss.addEventListener('click', () => {
+    dismissedUpdate = newestClientVersion()
+    try {
+      localStorage.setItem('sidecar:dismissedUpdate', dismissedUpdate || '')
+    } catch {
+      // storage unavailable — it comes back on reload, which is acceptable
+    }
+    renderUpdateBar()
+  })
 
   function render() {
     renderTree()
     renderTopbar()
     renderComposer()
     renderStatus()
+    renderUpdateBar()
   }
 
   function setConnected(ok) {

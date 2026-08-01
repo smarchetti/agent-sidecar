@@ -15,18 +15,21 @@
  * Per-project state:   <cwd>/.sidecar/{session.json,interactions.jsonl}
  */
 import { appendFile, mkdir, rename, stat, truncate, writeFile } from 'node:fs/promises'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { openSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
   PREFERRED_PORT,
+  PROTOCOL,
   SERVER_FILE,
   SERVER_LOG,
   SIDECAR_HOME,
   STATE_FILE,
   VERSION,
+  compareVersions,
   isServerAlive,
   originFromCwd,
+  probeServer,
   readServerInfo,
   type ArtifactSummary,
   type Interaction,
@@ -66,6 +69,15 @@ interface Session {
   origin: SessionOrigin
   /** Git branch when we can read one, else "session" — what the UI labels it with. */
   label: string
+  /**
+   * What the *client* half of this session is running. It can legitimately differ
+   * from the server's own version — each harness pins its own — so the UI shows
+   * both rather than implying one number describes everything.
+   */
+  version: string | null
+  protocol: number | null
+  /** Path this client was launched from; how the server finds newer code to restart into. */
+  entry: string | null
   pid: number | null
   startedAt: number
   lastSeenAt: number
@@ -94,6 +106,8 @@ function sessionSummary(s: Session) {
     project: s.project,
     origin: s.origin,
     label: s.label,
+    version: s.version,
+    protocol: s.protocol,
     // endedAt is the durable fact; attachments only disambiguate overlapping reconnects
     live: s.endedAt === null,
     startedAt: s.startedAt,
@@ -129,6 +143,9 @@ async function loadState() {
       // state written by an older server has no origin: derive one from the cwd
       origin: s.origin ?? originFromCwd(s.cwd ?? ''),
       label: s.label ?? 'session',
+      version: s.version ?? null,
+      protocol: s.protocol ?? null,
+      entry: s.entry ?? null,
       pid: s.pid ?? null,
       startedAt: s.startedAt ?? now,
       lastSeenAt: s.lastSeenAt ?? now,
@@ -175,6 +192,9 @@ async function persistState() {
         project: s.project,
         origin: s.origin,
         label: s.label,
+        version: s.version,
+        protocol: s.protocol,
+        entry: s.entry,
         pid: s.pid,
         startedAt: s.startedAt,
         lastSeenAt: s.lastSeenAt,
@@ -222,6 +242,9 @@ function registerSession(input: {
   label?: string
   pid?: number
   origin?: SessionOrigin
+  version?: string
+  protocol?: number
+  entry?: string
 }): Session {
   // a caller that doesn't know its repo (external POST, older client) still groups
   // sensibly: its own directory becomes its group
@@ -233,6 +256,10 @@ function registerSession(input: {
     existing.origin = input.origin ?? existing.origin
     existing.label = input.label || existing.label
     existing.pid = input.pid ?? existing.pid
+    // a client that reconnected after upgrading is now running different code
+    existing.version = input.version ?? existing.version
+    existing.protocol = input.protocol ?? existing.protocol
+    existing.entry = input.entry ?? existing.entry
     existing.lastSeenAt = Date.now()
     return existing
   }
@@ -246,6 +273,9 @@ function registerSession(input: {
     project: basename(input.cwd) || input.cwd,
     origin,
     label: input.label || 'session',
+    version: input.version ?? null,
+    protocol: input.protocol ?? null,
+    entry: input.entry ?? null,
     pid: input.pid ?? null,
     startedAt: now,
     lastSeenAt: now,
@@ -544,7 +574,13 @@ function broadcast(event: Record<string, unknown>) {
 function snapshot() {
   return {
     type: 'snapshot',
-    server: { pid: process.pid, port: PORT, startedAt: STARTED_AT, version: VERSION },
+    server: {
+      pid: process.pid,
+      port: PORT,
+      startedAt: STARTED_AT,
+      version: VERSION,
+      protocol: PROTOCOL,
+    },
     activeSessionId,
     sessions: [...sessions.values()]
       .map(sessionSummary)
@@ -616,9 +652,12 @@ async function handle(req: Request): Promise<Response> {
       ok: true,
       server: 'agent-sidecar',
       version: VERSION,
+      protocol: PROTOCOL,
       pid: process.pid,
       port: PORT,
       startedAt: STARTED_AT,
+      // lets a newly starting client decide whether replacing us would be seen
+      idle: isIdle(),
       sessions: { live: all.filter(s => s.endedAt === null).length, total: all.length },
       artifacts: artifactIndex.size,
       canvasTabs: canvasClients.size,
@@ -677,9 +716,17 @@ async function handle(req: Request): Promise<Response> {
       label: typeof body.label === 'string' ? body.label : undefined,
       pid: typeof body.pid === 'number' ? body.pid : undefined,
       origin: parseOrigin(body.origin),
+      version: typeof body.version === 'string' ? body.version : undefined,
+      protocol: typeof body.protocol === 'number' ? body.protocol : undefined,
+      entry: typeof body.entry === 'string' ? body.entry : undefined,
     })
     broadcast({ type: 'session', session: sessionSummary(session) })
-    return Response.json({ sessionId: session.id, url: BASE_URL, version: VERSION })
+    return Response.json({
+      sessionId: session.id,
+      url: BASE_URL,
+      version: VERSION,
+      protocol: PROTOCOL,
+    })
   }
 
   const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)(\/.*)?$/)
@@ -869,6 +916,23 @@ async function handle(req: Request): Promise<Response> {
     return Response.json({ ok: true, stopping: process.pid })
   }
 
+  /**
+   * Hand the canvas over to a newer version. Deliberately manual: restarting is
+   * always safe (state persists and clients re-attach within seconds) but it is
+   * visible, so the user makes the call rather than a background process.
+   */
+  if (req.method === 'POST' && path === '/api/restart') {
+    const target = successorEntry()
+    if (!target) {
+      return Response.json(
+        { ok: false, reason: `no session is running a version newer than ${VERSION}` },
+        { status: 409 },
+      )
+    }
+    setTimeout(() => void shutdown(0, target.entry), 50)
+    return Response.json({ ok: true, from: VERSION, to: target.version })
+  }
+
   return new Response('not found', { status: 404 })
 }
 
@@ -898,9 +962,10 @@ const serveOptions = {
 }
 
 /**
- * Bind the singleton port. If another sidecar server already holds a port in
- * the scan range we are the loser of a startup race and exit quietly; a foreign
- * process on the port just pushes us one higher.
+ * Bind the singleton port. If a sidecar speaking *our* protocol already holds a
+ * port in the scan range we are the loser of a startup race and exit quietly.
+ * Anything else on the port — a foreign process, or a sidecar on an incompatible
+ * protocol that we are deliberately coexisting with — just pushes us one higher.
  */
 async function bindPort() {
   if (PREFERRED_PORT === 0) return Bun.serve({ ...serveOptions, port: 0 }) // tests / ephemeral
@@ -908,11 +973,13 @@ async function bindPort() {
     try {
       return Bun.serve({ ...serveOptions, port })
     } catch (err) {
-      if (await isServerAlive(`http://127.0.0.1:${port}`)) {
+      const held = await probeServer(`http://127.0.0.1:${port}`)
+      if (held?.protocol === PROTOCOL) {
         console.error(`[sidecar] server already running on :${port} — nothing to do`)
         process.exit(0)
       }
-      console.error(`[sidecar] port ${port} taken by another process, trying ${port + 1}`)
+      const who = held ? `sidecar on protocol ${held.protocol}` : 'another process'
+      console.error(`[sidecar] port ${port} taken by ${who}, trying ${port + 1}`)
     }
   }
   throw new Error(
@@ -922,15 +989,52 @@ async function bindPort() {
 
 let httpServer: ReturnType<typeof Bun.serve> | null = null
 
-async function shutdown(code: number) {
+/**
+ * The newest client code any session has told us about, if it is ahead of us.
+ *
+ * A server can't discover a new release by itself — it only ever learns of one
+ * when a client registers from a newer entry path. Cross-protocol entries are
+ * skipped: handing off to code that can't talk to our clients isn't an upgrade.
+ */
+function successorEntry(): { entry: string; version: string } | null {
+  let best: { entry: string; version: string } | null = null
+  for (const s of sessions.values()) {
+    if (!s.entry || !s.version) continue
+    if (s.protocol !== null && s.protocol !== PROTOCOL) continue
+    if (!best || compareVersions(s.version, best.version) > 0) {
+      best = { entry: s.entry, version: s.version }
+    }
+  }
+  return best && compareVersions(best.version, VERSION) > 0 ? best : null
+}
+
+async function shutdown(code: number, successor?: string) {
   try {
     if (persistTimer) clearTimeout(persistTimer)
-    await persistState()
+    await persistState() // the canvas is restored by whoever comes up next
   } catch {
     // best effort
   }
   markServerStopped()
+  // Release the port *before* spawning, or the successor loses the bind race to
+  // a process that is about to exit anyway and scans itself onto a stray port.
   httpServer?.stop(true)
+  if (successor) {
+    try {
+      const log = openSync(SERVER_LOG, 'a')
+      Bun.spawn([process.execPath, successor, '--serve'], {
+        cwd: SIDECAR_HOME,
+        env: process.env,
+        stdin: 'ignore',
+        stdout: log,
+        stderr: log,
+        detached: true,
+      }).unref()
+    } catch (err) {
+      // clients re-spawn a server on their next tool call, so this is recoverable
+      console.error('[sidecar] could not launch successor:', err)
+    }
+  }
   process.exit(code)
 }
 
@@ -967,8 +1071,9 @@ export async function runServer(): Promise<void> {
   // Reuse the previous token so curl watchers and instruction text that outlived
   // a server restart keep working.
   const previous = await readServerInfo()
-  if (previous?.url && (await isServerAlive(previous.url))) {
-    console.error(`[sidecar] server already running at ${previous.url} — nothing to do`)
+  const holder = previous?.url ? await probeServer(previous.url) : null
+  if (holder?.protocol === PROTOCOL) {
+    console.error(`[sidecar] server already running at ${previous!.url} — nothing to do`)
     return
   }
   TOKEN = previous?.token ?? randomBytes(16).toString('hex')
@@ -986,6 +1091,7 @@ export async function runServer(): Promise<void> {
   const info = {
     server: 'agent-sidecar' as const,
     version: VERSION,
+    protocol: PROTOCOL,
     pid: process.pid,
     port: PORT,
     url: BASE_URL,

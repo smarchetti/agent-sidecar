@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**The server and the sessions on it can run different versions, and the canvas says so.**
+
+- **The client↔server contract has its own version.** `PROTOCOL` (currently `1`) covers the HTTP surface between an MCP client and the canvas server, and moves only when that surface breaks — separately from the package version, which moves every release. A 0.11 client and a 0.12 server share a canvas quite happily, so shipping a release no longer implies restarting a server out from under live sessions. Servers on incompatible protocols coexist instead of fighting: the discovery file is protocol-scoped (`server.json` stays the protocol-1 name), and the port scan steps past a sidecar that isn't speaking our protocol rather than assuming we lost a startup race.
+- **Sessions report the version of their own client half.** Registration now carries `version`, `protocol`, and the `entry` path the client was launched from. Previously the canvas showed one version — the server's — which was misleading with two harnesses pinning different releases: opening a Claude artifact could show Cursor's version in the corner. The sidebar now marks a session with its own version when it differs from the server's, `GET /api/sessions` and the canvas snapshot include it, and `--status` prints both.
+- **A stale server nobody is watching is replaced, not adopted.** Starting a client against an older server that has nothing attached and no canvas tab open stops it and starts the newer one first — the ordinary "upgrade the plugin, restart your editor" path, invisible because there was nothing to disturb. A server with anything attached is never restarted automatically.
+- **The canvas offers the restart instead of taking it.** When a live session is running newer code than the server, an update bar appears saying which versions are in play and how many live sessions will reconnect. `POST /api/restart` hands off to the newest `entry` a session has registered from: it persists state, releases the port, launches the successor, and exits, so the canvas URL never moves and clients re-attach on their own. Restarting was always safe — state persists and clients reconnect — but it is visible, so it stays a decision rather than a background surprise.
+- `GET /health` gained `protocol` and `idle`; `POST /api/sessions` returns `protocol`; `--status` prints the protocol and flags when the running server is a different release from the CLI asking.
+
 ## 0.11.0 — 2026-07-31
 
 **Grouped by repo and worktree, a timeline view of each session, and light/dark themes.**
